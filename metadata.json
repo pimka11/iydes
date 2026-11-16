@@ -1,0 +1,6 @@
+{
+  "name": "Долина Блоків — 3D Пригода",
+  "description": "3D пригодницька гра-бродилка в стилі Roblox з відкритим лісовим світом, річкою, мобами та різною зброєю.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
