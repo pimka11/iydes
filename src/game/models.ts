@@ -1075,9 +1075,11 @@ export interface CabinVisual {
   group: THREE.Group;
   roofGroup: THREE.Group;
   hearthLight: THREE.PointLight;
+  hearthFlame: THREE.Mesh;
+  indoorChestLid: THREE.Mesh;
 }
 
-// Enterable cabin with open doorway, interior floor, furniture, workbench, hearth, and cutaway roof
+// Enterable, richly detailed cabin with covered porch, flower boxes, furniture, hearth, workbench, bed, and indoor chest
 export function buildCabin(textures: ProceduralTextures): CabinVisual {
   const cabin = new THREE.Group();
   const roofGroup = new THREE.Group();
@@ -1086,29 +1088,36 @@ export function buildCabin(textures: ProceduralTextures): CabinVisual {
   const logMat = new THREE.MeshStandardMaterial({ map: textures.cabinLog, roughness: 0.85, metalness: 0.04 });
   const woodMat = new THREE.MeshStandardMaterial({ map: textures.woodPlank, roughness: 0.78, metalness: 0.05 });
   const darkWoodMat = new THREE.MeshStandardMaterial({ color: 0x3b2314, roughness: 0.82 });
+  const shutterMat = new THREE.MeshStandardMaterial({ color: 0x1e4620, roughness: 0.75 });
   const roofMat = new THREE.MeshStandardMaterial({ map: textures.roofShingle, roughness: 0.72, metalness: 0.1 });
   const rugMat = new THREE.MeshStandardMaterial({ color: 0x991b1b, roughness: 0.92 });
-  const bedMat = new THREE.MeshStandardMaterial({ color: 0x1e40af, roughness: 0.85 });
+  const rugTrimMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.85 });
+  const bedMat = new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.85 });
+  const quiltMat = new THREE.MeshStandardMaterial({ color: 0xb91c1c, roughness: 0.88 });
   const pillowMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.8 });
   const ironMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.85, roughness: 0.3 });
+  const goldMat = new THREE.MeshStandardMaterial({ color: 0xfbbf24, metalness: 0.85, roughness: 0.25 });
+  const flowerPinkMat = new THREE.MeshStandardMaterial({ color: 0xf43f5e, roughness: 0.65 });
+  const flowerGoldMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.65 });
+  const greeneryMat = new THREE.MeshStandardMaterial({ color: 0x3f6e24, roughness: 0.8 });
   const glowWinMat = new THREE.MeshStandardMaterial({
     color: 0xfef08a,
     emissive: 0xf59e0b,
-    emissiveIntensity: 1.1,
+    emissiveIntensity: 1.15,
     roughness: 0.25,
     transparent: true,
-    opacity: 0.85,
+    opacity: 0.86,
   });
   const emberMat = new THREE.MeshStandardMaterial({
     color: 0xfb923c,
     emissive: 0xea580c,
-    emissiveIntensity: 2.0,
-    roughness: 0.3,
+    emissiveIntensity: 2.2,
+    roughness: 0.25,
   });
 
   // 1. Stone Foundation & Plank Floor (top sits cleanly at y = 0.82)
   const foundation = new THREE.Mesh(
-    new THREE.BoxGeometry(CABIN_HALF_W * 2 + 0.5, 0.72, CABIN_HALF_D * 2 + 0.5),
+    new THREE.BoxGeometry(CABIN_HALF_W * 2 + 0.55, 0.72, CABIN_HALF_D * 2 + 0.55),
     stoneMat,
   );
   foundation.position.y = 0.36;
@@ -1118,14 +1127,27 @@ export function buildCabin(textures: ProceduralTextures): CabinVisual {
   );
   floorDeck.position.y = 0.76;
 
-  // Front Porch Deck + 2 Smooth Steps leading down to terrain
-  const porchDeck = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.24, 1.7), woodMat);
-  porchDeck.position.set(0, 0.7, CABIN_HALF_D + 0.85);
+  // Front Porch Deck + Timber Pillars + Smooth Steps leading down to terrain
+  const porchDeck = new THREE.Mesh(new THREE.BoxGeometry(4.6, 0.24, 1.8), woodMat);
+  porchDeck.position.set(0, 0.7, CABIN_HALF_D + 0.9);
   const step1 = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.22, 0.65), woodMat);
-  step1.position.set(0, 0.48, CABIN_HALF_D + 1.85);
+  step1.position.set(0, 0.48, CABIN_HALF_D + 1.9);
   const step2 = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.22, 0.65), woodMat);
-  step2.position.set(0, 0.24, CABIN_HALF_D + 2.45);
-  cabin.add(foundation, floorDeck, porchDeck, step1, step2);
+  step2.position.set(0, 0.24, CABIN_HALF_D + 2.5);
+  const porchPostL = new THREE.Mesh(new THREE.BoxGeometry(0.24, 3.05, 0.24), darkWoodMat);
+  porchPostL.position.set(-1.95, 2.25, CABIN_HALF_D + 1.62);
+  const porchPostR = porchPostL.clone();
+  porchPostR.position.x = 1.95;
+
+  // Corner timber posts for expressive silhouette & shadows
+  for (const cx of [-CABIN_HALF_W - 0.08, CABIN_HALF_W + 0.08]) {
+    for (const cz of [-CABIN_HALF_D - 0.08, CABIN_HALF_D + 0.08]) {
+      const col = new THREE.Mesh(new THREE.BoxGeometry(0.46, 3.65, 0.46), darkWoodMat);
+      col.position.set(cx, 2.58, cz);
+      cabin.add(col);
+    }
+  }
+  cabin.add(foundation, floorDeck, porchDeck, step1, step2, porchPostL, porchPostR);
 
   // 2. Hollow Walls (open 2.5m-wide doorway on +Z front wall)
   const wallH = 3.5;
@@ -1140,7 +1162,7 @@ export function buildCabin(textures: ProceduralTextures): CabinVisual {
   backWall.position.set(0, wallY, -CABIN_HALF_D);
 
   // Split front wall left & right of open doorway (|lx| < 1.25) + door lintel above
-  const sideSpan = CABIN_HALF_W - 1.25; // 2.65
+  const sideSpan = CABIN_HALF_W - 1.25;
   const frontLeftWall = new THREE.Mesh(new THREE.BoxGeometry(sideSpan, wallH, wallT), logMat);
   frontLeftWall.position.set(-1.25 - sideSpan * 0.5, wallY, CABIN_HALF_D);
   const frontRightWall = new THREE.Mesh(new THREE.BoxGeometry(sideSpan, wallH, wallT), logMat);
@@ -1148,7 +1170,7 @@ export function buildCabin(textures: ProceduralTextures): CabinVisual {
   const doorHeader = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.85, wallT), logMat);
   doorHeader.position.set(0, 0.82 + 2.65 + 0.425, CABIN_HALF_D);
 
-  // Timber door frame + warm porch lantern
+  // Timber door frame + warm porch lantern + wooden open door leaf
   const frameL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 2.68, 0.46), darkWoodMat);
   frameL.position.set(-1.25, 0.82 + 1.34, CABIN_HALF_D);
   const frameR = frameL.clone();
@@ -1157,16 +1179,38 @@ export function buildCabin(textures: ProceduralTextures): CabinVisual {
   openDoorLeaf.position.set(-1.18, 0.82 + 1.28, CABIN_HALF_D + 0.52);
   openDoorLeaf.rotation.y = Math.PI * 0.46;
 
-  // Front windows
+  // Front & side windows with painted shutters and colorful flower boxes
   const winL = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.0, 0.42), glowWinMat);
   winL.position.set(-2.55, 2.55, CABIN_HALF_D);
   const winR = winL.clone();
   winR.position.x = 2.55;
   const winSide = new THREE.Mesh(new THREE.BoxGeometry(0.42, 1.0, 1.25), glowWinMat);
   winSide.position.set(CABIN_HALF_W, 2.55, 0.4);
+  const winSideL = winSide.clone();
+  winSideL.position.x = -CABIN_HALF_W;
 
-  const porchLantern = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.34, 0.24), glowWinMat);
-  porchLantern.position.set(1.55, 3.05, CABIN_HALF_D + 0.38);
+  for (const wx of [-2.55, 2.55]) {
+    const shL = new THREE.Mesh(new THREE.BoxGeometry(0.24, 1.08, 0.12), shutterMat);
+    shL.position.set(wx - 0.66, 2.55, CABIN_HALF_D + 0.22);
+    const shR = shL.clone();
+    shR.position.x = wx + 0.66;
+    const box = new THREE.Mesh(new THREE.BoxGeometry(1.22, 0.24, 0.34), darkWoodMat);
+    box.position.set(wx, 1.92, CABIN_HALF_D + 0.3);
+    const bush = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.2, 0.26), greeneryMat);
+    bush.position.set(wx, 2.08, CABIN_HALF_D + 0.3);
+    cabin.add(shL, shR, box, bush);
+    for (let f = -1; f <= 1; f++) {
+      const fl = new THREE.Mesh(
+        new THREE.DodecahedronGeometry(0.11, 0),
+        f === 0 ? flowerGoldMat : flowerPinkMat,
+      );
+      fl.position.set(wx + f * 0.32, 2.2, CABIN_HALF_D + 0.32);
+      cabin.add(fl);
+    }
+  }
+
+  const porchLantern = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.36, 0.26), glowWinMat);
+  porchLantern.position.set(1.55, 3.08, CABIN_HALF_D + 0.38);
 
   cabin.add(
     leftWall,
@@ -1181,69 +1225,125 @@ export function buildCabin(textures: ProceduralTextures): CabinVisual {
     winL,
     winR,
     winSide,
+    winSideL,
     porchLantern,
   );
 
-  // 3. Cozy Walkable Interior Furnishings (at y = 0.82)
-  const rug = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.04, 2.6), rugMat);
+  // 3. Cozy Walkable Interactive Interior (at y = 0.82)
+  const rug = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.04, 2.7), rugMat);
   rug.position.set(0, 0.84, 0.35);
+  const rugTrim = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.045, 2.3), rugTrimMat);
+  rugTrim.position.set(0, 0.845, 0.35);
 
-  // Stone Fireplace against back wall
-  const hearthBase = new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.95, 0.85), stoneMat);
-  hearthBase.position.set(0, 1.8, -CABIN_HALF_D + 0.48);
+  // Stone Fireplace against back wall with glowing flame
+  const hearthBase = new THREE.Mesh(new THREE.BoxGeometry(2.1, 2.1, 0.9), stoneMat);
+  hearthBase.position.set(0, 1.85, -CABIN_HALF_D + 0.5);
+  const mantel = new THREE.Mesh(new THREE.BoxGeometry(2.35, 0.16, 1.05), darkWoodMat);
+  mantel.position.set(0, 2.85, -CABIN_HALF_D + 0.55);
   const emberBed = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.28, 0.45), emberMat);
   emberBed.position.set(0, 1.02, -CABIN_HALF_D + 0.65);
-  const hearthLight = new THREE.PointLight(0xffa94d, 4.5, 11, 1.6);
-  hearthLight.position.set(0, 2.1, -CABIN_HALF_D + 1.25);
+  const hearthFlame = new THREE.Mesh(new THREE.ConeGeometry(0.26, 0.65, 6), emberMat);
+  hearthFlame.position.set(0, 1.38, -CABIN_HALF_D + 0.65);
+  const hearthLight = new THREE.PointLight(0xffa94d, 5.2, 13, 1.5);
+  hearthLight.position.set(0, 2.15, -CABIN_HALF_D + 1.35);
 
   // Crafting Workbench on left wall (matches collider [-3.5, -1.9, -1.6, 0.3])
   const benchTop = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.14, 1.7), woodMat);
   benchTop.position.set(-2.7, 1.68, -0.65);
   const benchBase = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.82, 1.5), darkWoodMat);
   benchBase.position.set(-2.7, 1.23, -0.65);
-  const anvil = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.24, 0.52), ironMat);
-  anvil.position.set(-2.65, 1.87, -0.25);
-  const benchLantern = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.28, 0.22), glowWinMat);
-  benchLantern.position.set(-2.85, 1.89, -1.2);
+  const anvil = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.26, 0.54), ironMat);
+  anvil.position.set(-2.65, 1.88, -0.25);
+  const benchLantern = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.3, 0.24), glowWinMat);
+  benchLantern.position.set(-2.85, 1.9, -1.2);
 
-  // Bed on back-right (matches collider [1.5, 3.6, -2.9, -1.4])
-  const bedFrame = new THREE.Mesh(new THREE.BoxGeometry(1.85, 0.42, 1.2), darkWoodMat);
-  bedFrame.position.set(2.55, 1.03, -2.15);
-  const mattress = new THREE.Mesh(new THREE.BoxGeometry(1.72, 0.22, 1.08), bedMat);
-  mattress.position.set(2.55, 1.32, -2.15);
-  const pillow = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.16, 0.82), pillowMat);
-  pillow.position.set(3.15, 1.46, -2.15);
+  // Bookshelf against back-left wall (matches collider [-3.5, -1.8, -3.0, -2.0])
+  const shelfFrame = new THREE.Mesh(new THREE.BoxGeometry(1.45, 2.2, 0.65), darkWoodMat);
+  shelfFrame.position.set(-2.65, 1.92, -2.55);
+  const bookColors = [0xef4444, 0x3b82f6, 0x10b981, 0xf59e0b, 0xa855f7];
+  for (let row = 0; row < 2; row++) {
+    for (let b = 0; b < 5; b++) {
+      const book = new THREE.Mesh(
+        new THREE.BoxGeometry(0.18, 0.42, 0.34),
+        new THREE.MeshStandardMaterial({ color: bookColors[(b + row) % bookColors.length], roughness: 0.7 }),
+      );
+      book.position.set(-3.08 + b * 0.22, 1.48 + row * 0.72, -2.42);
+      cabin.add(book);
+    }
+  }
 
-  // Small table + stool near front-right interior
-  const tableTop = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 0.1, 10), woodMat);
+  // Interactive Bed on back-right (matches collider [1.5, 3.6, -2.9, -1.4])
+  const bedFrame = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.44, 1.25), darkWoodMat);
+  bedFrame.position.set(2.55, 1.04, -2.15);
+  const headboard = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.15, 1.3), darkWoodMat);
+  headboard.position.set(3.45, 1.4, -2.15);
+  const mattress = new THREE.Mesh(new THREE.BoxGeometry(1.76, 0.22, 1.12), bedMat);
+  mattress.position.set(2.55, 1.33, -2.15);
+  const quilt = new THREE.Mesh(new THREE.BoxGeometry(1.18, 0.24, 1.14), quiltMat);
+  quilt.position.set(2.26, 1.35, -2.15);
+  const pillow = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.18, 0.82), pillowMat);
+  pillow.position.set(3.15, 1.48, -2.15);
+
+  // Small table + stool + ceramic mug near front-right interior
+  const tableTop = new THREE.Mesh(new THREE.CylinderGeometry(0.64, 0.64, 0.1, 10), woodMat);
   tableTop.position.set(2.45, 1.58, 1.1);
   const tableLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 0.74, 8), darkWoodMat);
   tableLeg.position.set(2.45, 1.19, 1.1);
+  const mug = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.16, 8), pillowMat);
+  mug.position.set(2.35, 1.71, 1.05);
+  const tableLantern = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.24, 0.18), glowWinMat);
+  tableLantern.position.set(2.6, 1.75, 1.22);
+
+  // Interactive Indoor Supply Chest (matches collider [-3.5, -2.1, 1.35, 2.55])
+  const chestGroup = new THREE.Group();
+  chestGroup.position.set(-2.75, 0.82, 1.95);
+  chestGroup.rotation.y = Math.PI * 0.5;
+  const chestBase = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.58, 0.78), woodMat);
+  chestBase.position.y = 0.29;
+  const chestBand = new THREE.Mesh(new THREE.BoxGeometry(1.14, 0.1, 0.82), goldMat);
+  chestBand.position.y = 0.54;
+  const indoorChestLid = new THREE.Mesh(new THREE.BoxGeometry(1.12, 0.24, 0.8), darkWoodMat);
+  indoorChestLid.position.y = 0.7;
+  const chestLock = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.2, 0.08), goldMat);
+  chestLock.position.set(0, 0.54, 0.42);
+  chestGroup.add(chestBase, chestBand, indoorChestLid, chestLock);
 
   cabin.add(
     rug,
+    rugTrim,
     hearthBase,
+    mantel,
     emberBed,
+    hearthFlame,
     hearthLight,
     benchTop,
     benchBase,
     anvil,
     benchLantern,
+    shelfFrame,
     bedFrame,
+    headboard,
     mattress,
+    quilt,
     pillow,
     tableTop,
     tableLeg,
+    mug,
+    tableLantern,
+    chestGroup,
   );
 
-  // 4. Separate Cutaway Roof Group (hidden automatically when player enters cabin)
-  const roofSlopeL = new THREE.Mesh(new THREE.BoxGeometry(8.9, 0.24, 4.7), roofMat);
-  roofSlopeL.position.set(0, 5.2, -1.65);
+  // 4. Separate Cutaway Roof Group + Porch Awning (hidden automatically when player enters cabin)
+  const roofSlopeL = new THREE.Mesh(new THREE.BoxGeometry(9.1, 0.24, 4.8), roofMat);
+  roofSlopeL.position.set(0, 5.2, -1.68);
   roofSlopeL.rotation.x = 0.62;
-  const roofSlopeR = new THREE.Mesh(new THREE.BoxGeometry(8.9, 0.24, 4.7), roofMat);
-  roofSlopeR.position.set(0, 5.2, 1.65);
+  const roofSlopeR = new THREE.Mesh(new THREE.BoxGeometry(9.1, 0.24, 4.8), roofMat);
+  roofSlopeR.position.set(0, 5.2, 1.68);
   roofSlopeR.rotation.x = -0.62;
-  const ridge = new THREE.Mesh(new THREE.BoxGeometry(9.0, 0.28, 0.38), roofMat);
+  const porchAwning = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.16, 2.0), roofMat);
+  porchAwning.position.set(0, 3.82, CABIN_HALF_D + 0.92);
+  porchAwning.rotation.x = 0.2;
+  const ridge = new THREE.Mesh(new THREE.BoxGeometry(9.2, 0.28, 0.38), roofMat);
   ridge.position.set(0, 6.45, 0);
 
   const gableShape = new THREE.Shape();
@@ -1256,10 +1356,10 @@ export function buildCabin(textures: ProceduralTextures): CabinVisual {
   gableGeo.translate(-3.91, 4.32, 0);
   const gableMesh = new THREE.Mesh(gableGeo, logMat);
 
-  const chimney = new THREE.Mesh(new THREE.BoxGeometry(1.05, 3.2, 1.05), stoneMat);
+  const chimney = new THREE.Mesh(new THREE.BoxGeometry(1.08, 3.3, 1.08), stoneMat);
   chimney.position.set(0, 5.95, -2.55);
 
-  roofGroup.add(roofSlopeL, roofSlopeR, ridge, gableMesh, chimney);
+  roofGroup.add(roofSlopeL, roofSlopeR, porchAwning, ridge, gableMesh, chimney);
   cabin.add(roofGroup);
 
   cabin.traverse((obj) => {
@@ -1269,7 +1369,7 @@ export function buildCabin(textures: ProceduralTextures): CabinVisual {
     }
   });
 
-  return { group: cabin, roofGroup, hearthLight };
+  return { group: cabin, roofGroup, hearthLight, hearthFlame, indoorChestLid };
 }
 
 export function buildArchedBridge(textures: ProceduralTextures): THREE.Group {
@@ -1409,4 +1509,47 @@ export function buildCampfire(): { group: THREE.Group; flame: THREE.Mesh; light:
   group.add(light);
 
   return { group, flame, light };
+}
+
+export function buildBulletModel(scale = 1): THREE.Group {
+  const g = new THREE.Group();
+
+  const brassMat = new THREE.MeshStandardMaterial({
+    color: 0xf59e0b,
+    metalness: 0.88,
+    roughness: 0.22,
+  });
+  const tipMat = new THREE.MeshStandardMaterial({
+    color: 0xff5a1f,
+    emissive: 0xea580c,
+    emissiveIntensity: 1.45,
+    metalness: 0.65,
+    roughness: 0.25,
+  });
+  const rimMat = new THREE.MeshStandardMaterial({
+    color: 0x334155,
+    metalness: 0.85,
+    roughness: 0.3,
+  });
+
+  // Bullet aligned along +Z (tip at +Z) so lookAt points the nose forward
+  const casing = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.34, 10), brassMat);
+  casing.rotation.x = Math.PI * 0.5;
+  casing.position.z = -0.06;
+
+  const baseRim = new THREE.Mesh(new THREE.CylinderGeometry(0.125, 0.125, 0.06, 10), rimMat);
+  baseRim.rotation.x = Math.PI * 0.5;
+  baseRim.position.z = -0.24;
+
+  const warhead = new THREE.Mesh(new THREE.ConeGeometry(0.112, 0.24, 10), tipMat);
+  warhead.rotation.x = Math.PI * 0.5;
+  warhead.position.z = 0.23;
+
+  const glowBand = new THREE.Mesh(new THREE.CylinderGeometry(0.116, 0.116, 0.055, 10), tipMat);
+  glowBand.rotation.x = Math.PI * 0.5;
+  glowBand.position.z = 0.08;
+
+  g.add(casing, baseRim, warhead, glowBand);
+  g.scale.setScalar(scale);
+  return g;
 }

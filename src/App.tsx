@@ -6,6 +6,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { GameHud } from './components/GameHud';
 import { InventoryCraftModal } from './components/InventoryCraftModal';
+import { OfflineIndicator } from './components/OfflineIndicator';
+import { soundEngine } from './game/audio';
 import { ConsumableId, GameHudState, MobKind, WeaponId } from './game/types';
 import { BlocklandWorld } from './game/world';
 
@@ -23,22 +25,26 @@ const INITIAL_HUD: GameHudState = {
   wave: 1,
   activeMobs: 0,
   peacefulMobs: 0,
+  ammoBullets: 6,
   activeWeapon: 'sword',
   weaponCooldownRatio: 0,
   zoneName: 'Сонячна Галявина',
   insideCabin: false,
   nearCampfire: false,
   nearChest: false,
+  nearBed: false,
   nearWorkbench: false,
   nearResourceLabel: null,
   nearVillager: false,
   inWater: false,
   pointerLocked: false,
-  autoFollowCam: true,
+  autoFollowCam: false,
   dofEnabled: true,
   shadowUpscale: false,
   ecoMode: true,
   muted: false,
+  fps: 60,
+  frameMs: 16,
   resources: {
     wood: 2,
     stone: 1,
@@ -62,6 +68,12 @@ export default function App() {
   const [hud, setHud] = useState<GameHudState>(INITIAL_HUD);
   const [contextLost, setContextLost] = useState(false);
   const [inventoryTab, setInventoryTab] = useState<'inventory' | 'craft' | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [installModalOpen, setInstallModalOpen] = useState(false);
+
+  useEffect(() => {
+    worldRef.current?.setModalOpen(inventoryTab !== null || helpOpen || installModalOpen);
+  }, [inventoryTab, helpOpen, installModalOpen]);
 
   useEffect(() => {
     const container = mountRef.current;
@@ -71,17 +83,34 @@ export default function App() {
       container,
       (nextState) => setHud(nextState),
       () => setContextLost(true),
-      () => setInventoryTab('craft'),
+      () => {
+        soundEngine.unlock();
+        soundEngine.playInventoryToggle(true);
+        setInventoryTab('craft');
+      },
     );
     worldRef.current = world;
 
     const handleGlobalKey = (e: KeyboardEvent) => {
       if (e.code === 'KeyI') {
-        setInventoryTab((prev) => (prev === 'inventory' ? null : 'inventory'));
+        soundEngine.unlock();
+        setInventoryTab((prev) => {
+          const next = prev === 'inventory' ? null : 'inventory';
+          soundEngine.playInventoryToggle(next !== null);
+          return next;
+        });
       } else if (e.code === 'KeyK') {
-        setInventoryTab((prev) => (prev === 'craft' ? null : 'craft'));
+        soundEngine.unlock();
+        setInventoryTab((prev) => {
+          const next = prev === 'craft' ? null : 'craft';
+          soundEngine.playInventoryToggle(next !== null);
+          return next;
+        });
       } else if (e.code === 'Escape') {
-        setInventoryTab(null);
+        setInventoryTab((prev) => {
+          if (prev !== null) soundEngine.playInventoryToggle(false);
+          return null;
+        });
       }
     };
     window.addEventListener('keydown', handleGlobalKey);
@@ -94,7 +123,12 @@ export default function App() {
   }, []);
 
   const toggleOrOpenTab = (tab: 'inventory' | 'craft') => {
-    setInventoryTab((prev) => (prev === tab ? null : tab));
+    soundEngine.unlock();
+    setInventoryTab((prev) => {
+      const next = prev === tab ? null : tab;
+      soundEngine.playInventoryToggle(next !== null);
+      return next;
+    });
   };
 
   return (
@@ -123,6 +157,8 @@ export default function App() {
         hud={hud}
         inventoryTab={inventoryTab}
         onOpenInventory={toggleOrOpenTab}
+        onHelpOpenChange={setHelpOpen}
+        onInstallModalChange={setInstallModalOpen}
         onUseConsumable={(id: ConsumableId) => worldRef.current?.useConsumable(id)}
         onStart={() => worldRef.current?.startGame()}
         onRespawn={() => worldRef.current?.respawnPlayer()}
@@ -137,6 +173,7 @@ export default function App() {
         onTeleportRiver={() => worldRef.current?.teleportToRiver()}
         onInteract={() => worldRef.current?.interactNearby()}
         onAttack={() => worldRef.current?.triggerAttack()}
+        onThrowBullet={() => worldRef.current?.throwBullet()}
         onJump={() => worldRef.current?.jump()}
         onTouchMove={(x, z) => worldRef.current?.setTouchMove(x, z)}
       />
@@ -150,6 +187,8 @@ export default function App() {
         onCraft={(recipeId) => worldRef.current?.craftRecipe(recipeId)}
         onUseConsumable={(id) => worldRef.current?.useConsumable(id)}
       />
+
+      <OfflineIndicator />
     </main>
   );
 }

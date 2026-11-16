@@ -272,6 +272,7 @@ export interface GameHudState {
   xpToNext: number;
   level: number;
   coins: number;
+  ammoBullets: number;
   kills: number;
   wave: number;
   activeMobs: number;
@@ -283,6 +284,7 @@ export interface GameHudState {
   nearCampfire: boolean;
   nearChest: boolean;
   nearWorkbench: boolean;
+  nearBed: boolean;
   nearResourceLabel: string | null;
   nearVillager: boolean;
   inWater: boolean;
@@ -292,6 +294,8 @@ export interface GameHudState {
   shadowUpscale: boolean;
   ecoMode: boolean;
   muted: boolean;
+  fps: number;
+  frameMs: number;
   resources: Record<ResourceId, number>;
   consumables: Record<ConsumableId, number>;
   upgrades: UpgradeId[];

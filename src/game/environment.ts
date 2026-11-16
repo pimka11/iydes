@@ -1,9 +1,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
-  CABIN_X,
-  CABIN_Z,
   groundHeightAt,
+  nearAnyCabin,
   riverCenterX,
   riverHalfWidthAt,
   trailFactorAt,
@@ -37,31 +36,33 @@ function seededRandom(seed: number): () => number {
 
 function buildMultiBladeTuftGeometry(): THREE.BufferGeometry {
   const blades: THREE.BufferGeometry[] = [];
-  const angles = [0, 1.08, 2.24];
+  const angles = [0, 0.88, 1.85, 2.72, 3.68];
   const offsets: [number, number][] = [
     [0, 0],
-    [-0.15, 0.1],
-    [0.15, -0.08],
+    [-0.18, 0.12],
+    [0.19, -0.1],
+    [-0.1, -0.18],
+    [0.14, 0.17],
   ];
 
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 5; i++) {
     const g = new THREE.BufferGeometry();
-    const h = 1.15 + (i % 2) * 0.3;
-    const w = 0.095;
-    const lean = 0.14 + i * 0.045;
+    const h = 1.05 + (i % 3) * 0.28;
+    const w = 0.085;
+    const lean = 0.14 + (i % 3) * 0.055;
     const verts = new Float32Array([
       -w, 0, 0,
        w, 0, 0,
-       w * 0.58, h * 0.55, lean * 0.35,
-      -w * 0.58, h * 0.55, lean * 0.35,
+       w * 0.56, h * 0.55, lean * 0.35,
+      -w * 0.56, h * 0.55, lean * 0.35,
        0, h, lean,
     ]);
     const cols = new Float32Array([
-      0.22, 0.34, 0.12,
-      0.22, 0.34, 0.12,
-      0.56, 0.72, 0.24,
-      0.56, 0.72, 0.24,
-      0.88, 0.96, 0.44,
+      0.2, 0.34, 0.11,
+      0.2, 0.34, 0.11,
+      0.54, 0.72, 0.23,
+      0.54, 0.72, 0.23,
+      0.86, 0.96, 0.42,
     ]);
     g.setAttribute('position', new THREE.BufferAttribute(verts, 3));
     g.setAttribute('color', new THREE.BufferAttribute(cols, 3));
@@ -268,7 +269,7 @@ export function buildWorldEnvironment(textures: ProceduralTextures): WorldEnviro
   const rand = seededRandom(42069);
 
   // 0. Atmospheric sunlit sky dome
-  const skyGeo = new THREE.SphereGeometry(290, 24, 16);
+  const skyGeo = new THREE.SphereGeometry(420, 24, 16);
   const skyMat = new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
@@ -428,7 +429,7 @@ export function buildWorldEnvironment(textures: ProceduralTextures): WorldEnviro
   group.add(bankInst);
   disposables.push(wallBoxGeo, bankStoneMat);
 
-  // 4. Lush Tall Meadow Grass (5,400 tufts across expanded meadows, lightweight MeshLambertMaterial)
+  // 4. 15x Denser Meadow Grass across the ENTIRE 230m-radius map (56,000 5-blade tufts in 16 frustum-culled chunks)
   const tuftGeo = buildMultiBladeTuftGeometry();
   const sharedEnvUniforms = { uTime: { value: 0 } };
   const grassMat = new THREE.MeshLambertMaterial({
@@ -449,101 +450,136 @@ export function buildWorldEnvironment(textures: ProceduralTextures): WorldEnviro
       );
   };
 
-  const grassCount = 5400;
-  const grassInst = new THREE.InstancedMesh(tuftGeo, grassMat, grassCount);
-  grassInst.receiveShadow = true;
-  let placed = 0;
-  let attempts = 0;
+  const GRID_DIV = 4;
+  const CHUNK_SPAN = (WORLD_PLAYABLE_RADIUS * 2) / GRID_DIV;
+  const grassChunks: { matrices: number[]; colors: number[] }[] = Array.from(
+    { length: GRID_DIV * GRID_DIV },
+    () => ({ matrices: [], colors: [] }),
+  );
   const gColor = new THREE.Color();
-  while (placed < grassCount && attempts < grassCount * 6) {
+  const grassTarget = 56000;
+  let grassPlaced = 0;
+  let attempts = 0;
+  while (grassPlaced < grassTarget && attempts < grassTarget * 4) {
     attempts++;
-    const useNear = placed < 2800;
-    const range = useNear ? 52 : WORLD_PLAYABLE_RADIUS * 1.8;
-    const x = (rand() - 0.5) * range * (useNear ? 1.8 : 1.0);
-    const z = (rand() - 0.5) * range * (useNear ? 1.8 : 1.0);
-    if (Math.hypot(x, z) > WORLD_PLAYABLE_RADIUS - 4) continue;
+    const x = (rand() - 0.5) * WORLD_PLAYABLE_RADIUS * 1.96;
+    const z = (rand() - 0.5) * WORLD_PLAYABLE_RADIUS * 1.96;
+    if (Math.hypot(x, z) > WORLD_PLAYABLE_RADIUS - 3) continue;
     const distRiver = Math.abs(x - riverCenterX(z)) - riverHalfWidthAt(z);
-    if (distRiver < 0.7) continue;
-    if (trailFactorAt(x, z) > 0.24) continue;
-    if (Math.hypot(x - CABIN_X, z - CABIN_Z) < 6.4) continue;
-
+    if (distRiver < 0.65) continue;
+    if (trailFactorAt(x, z) > 0.22) continue;
+    if (nearAnyCabin(x, z, 6.8)) continue;
     const y = groundHeightAt(x, z);
-    if (y < WATER_LEVEL + 0.28) continue;
+    if (y < WATER_LEVEL + 0.24) continue;
 
     dummy.position.set(x, y - 0.05, z);
     dummy.rotation.set((rand() - 0.5) * 0.2, rand() * Math.PI * 2, (rand() - 0.5) * 0.2);
-    const s = 0.92 + rand() * 0.8;
-    dummy.scale.set(s, s * (0.9 + rand() * 0.5), s);
+    const s = 0.85 + rand() * 0.9;
+    dummy.scale.set(s, s * (0.85 + rand() * 0.55), s);
     dummy.updateMatrix();
-    grassInst.setMatrixAt(placed, dummy.matrix);
 
-    gColor.setHSL(0.24 + (rand() - 0.5) * 0.04, 0.56 + rand() * 0.16, 0.78 + rand() * 0.22);
-    grassInst.setColorAt(placed, gColor);
-    placed++;
+    const cx = Math.min(GRID_DIV - 1, Math.max(0, Math.floor((x + WORLD_PLAYABLE_RADIUS) / CHUNK_SPAN)));
+    const cz = Math.min(GRID_DIV - 1, Math.max(0, Math.floor((z + WORLD_PLAYABLE_RADIUS) / CHUNK_SPAN)));
+    const chunk = grassChunks[cz * GRID_DIV + cx];
+    chunk.matrices.push(...dummy.matrix.elements);
+
+    gColor.setHSL(0.23 + (rand() - 0.5) * 0.06, 0.54 + rand() * 0.2, 0.74 + rand() * 0.24);
+    chunk.colors.push(gColor.r, gColor.g, gColor.b);
+    grassPlaced++;
   }
-  grassInst.count = placed;
-  grassInst.instanceMatrix.needsUpdate = true;
-  if (grassInst.instanceColor) grassInst.instanceColor.needsUpdate = true;
-  grassInst.computeBoundingSphere();
-  group.add(grassInst);
+
+  const m4 = new THREE.Matrix4();
+  for (const chunk of grassChunks) {
+    const cnt = chunk.matrices.length / 16;
+    if (cnt === 0) continue;
+    const inst = new THREE.InstancedMesh(tuftGeo, grassMat, cnt);
+    inst.receiveShadow = true;
+    for (let i = 0; i < cnt; i++) {
+      m4.fromArray(chunk.matrices, i * 16);
+      inst.setMatrixAt(i, m4);
+      gColor.setRGB(chunk.colors[i * 3], chunk.colors[i * 3 + 1], chunk.colors[i * 3 + 2]);
+      inst.setColorAt(i, gColor);
+    }
+    inst.instanceMatrix.needsUpdate = true;
+    if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+    inst.computeBoundingSphere();
+    group.add(inst);
+  }
   disposables.push(tuftGeo, grassMat);
 
-  // 4b. Wildflower Clumps across the meadows (900 instanced crossed flower cards)
-  const flowerGeo = buildCrossedCardGeometry(0.95, 0.82);
-  const flowerMat = new THREE.MeshLambertMaterial({
-    map: textures.flowerCluster,
-    alphaTest: 0.4,
-    side: THREE.DoubleSide,
-  });
-  const flowerCount = 900;
-  const flowerInst = new THREE.InstancedMesh(flowerGeo, flowerMat, flowerCount);
-  flowerInst.receiveShadow = true;
+  // 4b. Colorful Wildflowers (12,000 clumps across 4 flower species & 4 spatial quadrants)
+  const flowerGeo = buildCrossedCardGeometry(1.0, 0.88);
+  const flowerMats = textures.flowerTextures.map(
+    (tex) =>
+      new THREE.MeshLambertMaterial({
+        map: tex,
+        alphaTest: 0.38,
+        side: THREE.DoubleSide,
+      }),
+  );
+  const flowerBuckets: number[][][] = Array.from({ length: 4 }, () =>
+    Array.from({ length: 4 }, () => []),
+  );
   let flowersPlaced = 0;
-  for (let i = 0; i < 2400 && flowersPlaced < flowerCount; i++) {
-    const r = 6 + Math.pow(rand(), 0.75) * (WORLD_PLAYABLE_RADIUS - 12);
+  for (let i = 0; i < 32000 && flowersPlaced < 12000; i++) {
+    const r = 4 + Math.pow(rand(), 0.58) * (WORLD_PLAYABLE_RADIUS - 8);
     const a = rand() * Math.PI * 2;
     const x = Math.cos(a) * r;
     const z = Math.sin(a) * r;
-    if (Math.abs(x - riverCenterX(z)) - riverHalfWidthAt(z) < 1.2) continue;
-    if (trailFactorAt(x, z) > 0.18) continue;
-    if (Math.hypot(x - CABIN_X, z - CABIN_Z) < 6.4) continue;
+    if (Math.abs(x - riverCenterX(z)) - riverHalfWidthAt(z) < 1.0) continue;
+    if (trailFactorAt(x, z) > 0.16) continue;
+    if (nearAnyCabin(x, z, 6.8)) continue;
     const y = groundHeightAt(x, z);
-    if (y < WATER_LEVEL + 0.35) continue;
+    if (y < WATER_LEVEL + 0.3) continue;
 
     dummy.position.set(x, y - 0.04, z);
     dummy.rotation.set(0, rand() * Math.PI * 2, 0);
-    const fs = 0.75 + rand() * 0.65;
-    dummy.scale.setScalar(fs);
+    dummy.scale.setScalar(0.75 + rand() * 0.78);
     dummy.updateMatrix();
-    flowerInst.setMatrixAt(flowersPlaced, dummy.matrix);
+
+    const species = Math.floor(rand() * 4);
+    const quad = (x >= 0 ? 1 : 0) + (z >= 0 ? 2 : 0);
+    flowerBuckets[species][quad].push(...dummy.matrix.elements);
     flowersPlaced++;
   }
-  flowerInst.count = flowersPlaced;
-  flowerInst.instanceMatrix.needsUpdate = true;
-  flowerInst.computeBoundingSphere();
-  group.add(flowerInst);
-  disposables.push(flowerGeo, flowerMat);
+  for (let sIdx = 0; sIdx < 4; sIdx++) {
+    for (let q = 0; q < 4; q++) {
+      const mats = flowerBuckets[sIdx][q];
+      const cnt = mats.length / 16;
+      if (cnt === 0) continue;
+      const fInst = new THREE.InstancedMesh(flowerGeo, flowerMats[sIdx], cnt);
+      fInst.receiveShadow = true;
+      for (let i = 0; i < cnt; i++) {
+        m4.fromArray(mats, i * 16);
+        fInst.setMatrixAt(i, m4);
+      }
+      fInst.instanceMatrix.needsUpdate = true;
+      fInst.computeBoundingSphere();
+      group.add(fInst);
+    }
+  }
+  disposables.push(flowerGeo, ...flowerMats);
 
-  // 4c. Riverbank Reeds & Cattails along both shores (420 instanced clumps)
-  const reedGeo = buildCrossedCardGeometry(1.1, 1.85);
+  // 4c. Riverbank Reeds & Cattails along the whole winding river (3,400 clumps)
+  const reedGeo = buildCrossedCardGeometry(1.15, 1.95);
   const reedMat = new THREE.MeshLambertMaterial({
     map: textures.reedCluster,
     alphaTest: 0.38,
     side: THREE.DoubleSide,
   });
-  const reedCount = 420;
+  const reedCount = 3400;
   const reedInst = new THREE.InstancedMesh(reedGeo, reedMat, reedCount);
   reedInst.receiveShadow = true;
   let reedsPlaced = 0;
-  for (let i = 0; i < 900 && reedsPlaced < reedCount; i++) {
-    const z = (rand() - 0.5) * (WORLD_PLAYABLE_RADIUS * 1.9);
-    if (Math.abs(z - (-10)) < 5.2) continue; // keep bridge clear
+  for (let i = 0; i < 6500 && reedsPlaced < reedCount; i++) {
+    const z = (rand() - 0.5) * (WORLD_PLAYABLE_RADIUS * 1.94);
+    if (Math.abs(z - (-10)) < 5.2) continue;
     const side = rand() > 0.5 ? 1 : -1;
-    const x = riverCenterX(z) + side * (riverHalfWidthAt(z) - 0.35 + rand() * 1.15);
+    const x = riverCenterX(z) + side * (riverHalfWidthAt(z) - 0.35 + rand() * 1.35);
     const y = groundHeightAt(x, z);
     dummy.position.set(x, Math.max(WATER_LEVEL - 0.25, y - 0.08), z);
     dummy.rotation.set(0, rand() * Math.PI * 2, 0);
-    dummy.scale.setScalar(0.85 + rand() * 0.55);
+    dummy.scale.setScalar(0.8 + rand() * 0.65);
     dummy.updateMatrix();
     reedInst.setMatrixAt(reedsPlaced, dummy.matrix);
     reedsPlaced++;
@@ -554,116 +590,137 @@ export function buildWorldEnvironment(textures: ProceduralTextures): WorldEnviro
   group.add(reedInst);
   disposables.push(reedGeo, reedMat);
 
-  // 5. Realistic Multi-Species Forest (145 Broadleaf Oaks + 75 Mountain/Northern Pines)
-  const oakPositions: { x: number; z: number; scale: number }[] = [
-    { x: -13.5, z: -2.0, scale: 1.32 },
-    { x: 6.2, z: -4.8, scale: 1.44 },
-    { x: -24.0, z: -12.0, scale: 1.38 },
-    { x: -9.0, z: -31.0, scale: 1.3 },
+  // 5. Varied-Size & Multi-Colored Forest (Saplings -> Giant Oaks, Autumn Oaks, Flowering Blossom Trees, Pines)
+  type TreePlacement = { x: number; z: number; scale: number; hBias: number };
+  const oakPositions: TreePlacement[] = [
+    { x: -13.5, z: -2.0, scale: 1.35, hBias: 1.02 },
+    { x: 6.2, z: -4.8, scale: 1.58, hBias: 1.08 },
+    { x: -24.0, z: -12.0, scale: 1.44, hBias: 1.0 },
+    { x: -9.0, z: -31.0, scale: 1.25, hBias: 0.96 },
   ];
-  const pinePositions: { x: number; z: number; scale: number }[] = [];
-  oakPositions.forEach((tp) => colliders.push({ x: tp.x, z: tp.z, radius: 0.72 * tp.scale }));
+  const autumnPositions: TreePlacement[] = [];
+  const blossomPositions: TreePlacement[] = [
+    { x: -6.5, z: -26.5, scale: 1.05, hBias: 0.95 },
+  ];
+  const pinePositions: TreePlacement[] = [];
+  const allTrees: TreePlacement[] = [...oakPositions, ...blossomPositions];
+  allTrees.forEach((tp) => colliders.push({ x: tp.x, z: tp.z, radius: 0.72 * tp.scale }));
 
-  for (let i = 0; i < 520 && oakPositions.length + pinePositions.length < 220; i++) {
+  for (let i = 0; i < 1200 && allTrees.length < 380; i++) {
     const angle = rand() * Math.PI * 2;
-    const dist = 13 + Math.pow(rand(), 0.78) * (WORLD_PLAYABLE_RADIUS + 20);
+    const dist = 16 + Math.pow(rand(), 0.65) * (WORLD_PLAYABLE_RADIUS - 8);
     const x = Math.cos(angle) * dist;
     const z = Math.sin(angle) * dist;
 
-    if (Math.hypot(x + 2, z - 9) < 9.5) continue;
-    if (Math.hypot(x - CABIN_X, z - CABIN_Z) < 12.0) continue;
-    if (Math.hypot(x - 46, z + 24) < 13) continue;
-    if (Math.hypot(x + 62, z - 42) < 12) continue;
-    if (Math.hypot(x - 84, z - 46) < 13) continue;
-    if (Math.abs(x - riverCenterX(z)) < riverHalfWidthAt(z) + 4.2) continue;
-    if (trailFactorAt(x, z) > 0.06) continue;
+    if (Math.hypot(x + 2, z - 9) < 11.5) continue;
+    if (nearAnyCabin(x, z, 12.5)) continue;
+    if (Math.hypot(x - 46, z + 24) < 14) continue;
+    if (Math.hypot(x + 62, z - 42) < 13) continue;
+    if (Math.hypot(x - 84, z - 46) < 14) continue;
+    if (Math.abs(x - riverCenterX(z)) < riverHalfWidthAt(z) + 4.8) continue;
+    if (trailFactorAt(x, z) > 0.05) continue;
 
     let tooClose = false;
-    for (const tp of oakPositions) {
-      if (Math.hypot(x - tp.x, z - tp.z) < 5.5) {
+    for (const tp of allTrees) {
+      if (Math.hypot(x - tp.x, z - tp.z) < 6.2) {
         tooClose = true;
         break;
       }
     }
-    if (!tooClose) {
-      for (const tp of pinePositions) {
-        if (Math.hypot(x - tp.x, z - tp.z) < 5.5) {
-          tooClose = true;
-          break;
-        }
-      }
-    }
     if (tooClose) continue;
 
-    const scale = 0.92 + rand() * 0.68;
-    const isPine = (z < -36 || dist > 62) && pinePositions.length < 75 && rand() < 0.6;
-    if (isPine) {
-      pinePositions.push({ x, z, scale });
-    } else if (oakPositions.length < 145) {
-      oakPositions.push({ x, z, scale });
+    // Wide tree size variety: 0.52 saplings -> 2.15 giant ancient trees
+    const rSize = rand();
+    const scale = rSize < 0.25 ? 0.52 + rand() * 0.34 : rSize < 0.76 ? 0.92 + rand() * 0.58 : 1.55 + rand() * 0.62;
+    const hBias = 0.88 + rand() * 0.3;
+    const placement: TreePlacement = { x, z, scale, hBias };
+
+    const roll = rand();
+    if ((z < -38 || dist > 92) && pinePositions.length < 95 && roll < 0.52) {
+      pinePositions.push(placement);
+    } else if (blossomPositions.length < 48 && roll < 0.18) {
+      blossomPositions.push(placement);
+    } else if (autumnPositions.length < 58 && roll < 0.34) {
+      autumnPositions.push(placement);
     } else {
-      pinePositions.push({ x, z, scale });
+      oakPositions.push(placement);
     }
+    allTrees.push(placement);
+
     if (Math.hypot(x, z) < WORLD_PLAYABLE_RADIUS) {
-      colliders.push({ x, z, radius: 0.7 * scale });
+      colliders.push({ x, z, radius: 0.68 * scale });
     }
   }
 
-  // Broadleaf Oaks
   const { woodGeo, canopyGeo } = buildRealisticTreeGeometries();
   const trunkMat = new THREE.MeshLambertMaterial({ map: textures.treeBark });
-  const foliageMat = new THREE.MeshLambertMaterial({
-    map: textures.leafCluster,
-    alphaTest: 0.42,
-    side: THREE.DoubleSide,
-    vertexColors: true,
-  });
-  foliageMat.onBeforeCompile = (shader) => {
-    shader.uniforms.uTime = sharedEnvUniforms.uTime;
-    shader.vertexShader =
-      `uniform float uTime;\n` +
-      shader.vertexShader.replace(
-        '#include <begin_vertex>',
-        `#include <begin_vertex>
-        float leafFactor = max(0.0, (position.y - 4.0) * 0.22);
-        transformed.x += sin(uTime * 1.45 + float(gl_InstanceID) * 0.8 + position.z * 0.5) * 0.075 * leafFactor;
-        transformed.z += cos(uTime * 1.25 + float(gl_InstanceID) * 0.6 + position.x * 0.5) * 0.055 * leafFactor;`,
+  const makeFoliageBatch = (
+    list: TreePlacement[],
+    tex: THREE.CanvasTexture,
+    hueBase: number,
+    hueSpan: number,
+    satBase: number,
+  ) => {
+    if (list.length === 0) return;
+    const fMat = new THREE.MeshLambertMaterial({
+      map: tex,
+      alphaTest: 0.4,
+      side: THREE.DoubleSide,
+      vertexColors: true,
+    });
+    fMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = sharedEnvUniforms.uTime;
+      shader.vertexShader =
+        `uniform float uTime;\n` +
+        shader.vertexShader.replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+          float leafFactor = max(0.0, (position.y - 4.0) * 0.22);
+          transformed.x += sin(uTime * 1.45 + float(gl_InstanceID) * 0.8 + position.z * 0.5) * 0.08 * leafFactor;
+          transformed.z += cos(uTime * 1.25 + float(gl_InstanceID) * 0.6 + position.x * 0.5) * 0.06 * leafFactor;`,
+        );
+    };
+    const fDepthMat = new THREE.MeshDepthMaterial({
+      depthPacking: THREE.RGBADepthPacking,
+      map: tex,
+      alphaTest: 0.4,
+    });
+    const tInst = new THREE.InstancedMesh(woodGeo, trunkMat, list.length);
+    const cInst = new THREE.InstancedMesh(canopyGeo, fMat, list.length);
+    tInst.castShadow = true;
+    tInst.receiveShadow = true;
+    cInst.castShadow = true;
+    cInst.receiveShadow = true;
+    cInst.customDepthMaterial = fDepthMat;
+
+    const lCol = new THREE.Color();
+    list.forEach((tp, idx) => {
+      const y = groundHeightAt(tp.x, tp.z);
+      dummy.position.set(tp.x, y - 0.25, tp.z);
+      dummy.rotation.set((rand() - 0.5) * 0.06, rand() * Math.PI * 2, (rand() - 0.5) * 0.06);
+      dummy.scale.set(
+        tp.scale * (0.9 + rand() * 0.22),
+        tp.scale * tp.hBias,
+        tp.scale * (0.9 + rand() * 0.22),
       );
+      dummy.updateMatrix();
+      tInst.setMatrixAt(idx, dummy.matrix);
+      cInst.setMatrixAt(idx, dummy.matrix);
+      lCol.setHSL(hueBase + (rand() - 0.5) * hueSpan, satBase + rand() * 0.16, 0.76 + rand() * 0.24);
+      cInst.setColorAt(idx, lCol);
+    });
+    [tInst, cInst].forEach((inst) => {
+      inst.instanceMatrix.needsUpdate = true;
+      if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+      inst.computeBoundingSphere();
+      group.add(inst);
+    });
+    disposables.push(fMat, fDepthMat);
   };
-  const foliageDepthMat = new THREE.MeshDepthMaterial({
-    depthPacking: THREE.RGBADepthPacking,
-    map: textures.leafCluster,
-    alphaTest: 0.42,
-  });
 
-  const oCount = oakPositions.length;
-  const trunkInst = new THREE.InstancedMesh(woodGeo, trunkMat, oCount);
-  const canopyInst = new THREE.InstancedMesh(canopyGeo, foliageMat, oCount);
-  trunkInst.castShadow = true;
-  trunkInst.receiveShadow = true;
-  canopyInst.castShadow = true;
-  canopyInst.receiveShadow = true;
-  canopyInst.customDepthMaterial = foliageDepthMat;
-
-  const leafCol = new THREE.Color();
-  oakPositions.forEach((tp, idx) => {
-    const y = groundHeightAt(tp.x, tp.z);
-    dummy.position.set(tp.x, y - 0.25, tp.z);
-    dummy.rotation.set((rand() - 0.5) * 0.05, rand() * Math.PI * 2, (rand() - 0.5) * 0.05);
-    dummy.scale.set(tp.scale * (0.9 + rand() * 0.22), tp.scale * (0.92 + rand() * 0.2), tp.scale * (0.9 + rand() * 0.22));
-    dummy.updateMatrix();
-    trunkInst.setMatrixAt(idx, dummy.matrix);
-    canopyInst.setMatrixAt(idx, dummy.matrix);
-
-    leafCol.setHSL(0.24 + (rand() - 0.5) * 0.06, 0.25 + rand() * 0.2, 0.72 + rand() * 0.28);
-    canopyInst.setColorAt(idx, leafCol);
-  });
-  [trunkInst, canopyInst].forEach((inst) => {
-    inst.instanceMatrix.needsUpdate = true;
-    if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
-    inst.computeBoundingSphere();
-    group.add(inst);
-  });
+  makeFoliageBatch(oakPositions, textures.leafCluster, 0.24, 0.06, 0.22);
+  makeFoliageBatch(autumnPositions, textures.autumnLeafCluster, 0.08, 0.05, 0.22);
+  makeFoliageBatch(blossomPositions, textures.blossomLeafCluster, 0.94, 0.06, 0.18);
 
   // Conifer Pines
   const { pineWoodGeo, pineCanopyGeo } = buildPineTreeGeometries();
@@ -679,46 +736,47 @@ export function buildWorldEnvironment(textures: ProceduralTextures): WorldEnviro
     alphaTest: 0.4,
   });
   const pCount = pinePositions.length;
-  const pineTrunkInst = new THREE.InstancedMesh(pineWoodGeo, trunkMat, pCount);
-  const pineCanopyInst = new THREE.InstancedMesh(pineCanopyGeo, pineMat, pCount);
-  pineTrunkInst.castShadow = true;
-  pineTrunkInst.receiveShadow = true;
-  pineCanopyInst.castShadow = true;
-  pineCanopyInst.receiveShadow = true;
-  pineCanopyInst.customDepthMaterial = pineDepthMat;
+  if (pCount > 0) {
+    const pineTrunkInst = new THREE.InstancedMesh(pineWoodGeo, trunkMat, pCount);
+    const pineCanopyInst = new THREE.InstancedMesh(pineCanopyGeo, pineMat, pCount);
+    pineTrunkInst.castShadow = true;
+    pineTrunkInst.receiveShadow = true;
+    pineCanopyInst.castShadow = true;
+    pineCanopyInst.receiveShadow = true;
+    pineCanopyInst.customDepthMaterial = pineDepthMat;
 
-  pinePositions.forEach((tp, idx) => {
-    const y = groundHeightAt(tp.x, tp.z);
-    dummy.position.set(tp.x, y - 0.25, tp.z);
-    dummy.rotation.set(0, rand() * Math.PI * 2, 0);
-    dummy.scale.set(tp.scale * 0.95, tp.scale * (1.0 + rand() * 0.25), tp.scale * 0.95);
-    dummy.updateMatrix();
-    pineTrunkInst.setMatrixAt(idx, dummy.matrix);
-    pineCanopyInst.setMatrixAt(idx, dummy.matrix);
+    const leafCol = new THREE.Color();
+    pinePositions.forEach((tp, idx) => {
+      const y = groundHeightAt(tp.x, tp.z);
+      dummy.position.set(tp.x, y - 0.25, tp.z);
+      dummy.rotation.set(0, rand() * Math.PI * 2, 0);
+      dummy.scale.set(tp.scale * 0.95, tp.scale * (tp.hBias + 0.12), tp.scale * 0.95);
+      dummy.updateMatrix();
+      pineTrunkInst.setMatrixAt(idx, dummy.matrix);
+      pineCanopyInst.setMatrixAt(idx, dummy.matrix);
 
-    leafCol.setHSL(0.32 + (rand() - 0.5) * 0.04, 0.22 + rand() * 0.14, 0.75 + rand() * 0.22);
-    pineCanopyInst.setColorAt(idx, leafCol);
-  });
-  [pineTrunkInst, pineCanopyInst].forEach((inst) => {
-    inst.instanceMatrix.needsUpdate = true;
-    if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
-    inst.computeBoundingSphere();
-    group.add(inst);
-  });
+      leafCol.setHSL(0.32 + (rand() - 0.5) * 0.04, 0.22 + rand() * 0.14, 0.75 + rand() * 0.22);
+      pineCanopyInst.setColorAt(idx, leafCol);
+    });
+    [pineTrunkInst, pineCanopyInst].forEach((inst) => {
+      inst.instanceMatrix.needsUpdate = true;
+      if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+      inst.computeBoundingSphere();
+      group.add(inst);
+    });
+  }
 
   disposables.push(
     woodGeo,
     trunkMat,
     canopyGeo,
-    foliageMat,
-    foliageDepthMat,
     pineWoodGeo,
     pineCanopyGeo,
     pineMat,
     pineDepthMat,
   );
 
-  // 6. Realistic Forest Ferns & Undergrowth Shrubs (230 instances across the expanded forest)
+  // 6. 15x Denser Forest Ferns & Undergrowth Shrubs (3,400 instances across 4 spatial quadrants)
   const bushGeo = buildFernBushGeometry();
   const bushMat = new THREE.MeshLambertMaterial({
     map: textures.fernCluster,
@@ -726,35 +784,49 @@ export function buildWorldEnvironment(textures: ProceduralTextures): WorldEnviro
     side: THREE.DoubleSide,
     vertexColors: true,
   });
-  const bushCount = 230;
-  const bushInst = new THREE.InstancedMesh(bushGeo, bushMat, bushCount);
-  bushInst.receiveShadow = true;
+  const bushQuads: { matrices: number[]; colors: number[] }[] = Array.from({ length: 4 }, () => ({
+    matrices: [],
+    colors: [],
+  }));
   let bushesPlaced = 0;
-  for (let i = 0; i < 520 && bushesPlaced < bushCount; i++) {
-    const x = (rand() - 0.5) * WORLD_PLAYABLE_RADIUS * 1.75;
-    const z = (rand() - 0.5) * WORLD_PLAYABLE_RADIUS * 1.75;
+  for (let i = 0; i < 9000 && bushesPlaced < 3400; i++) {
+    const x = (rand() - 0.5) * WORLD_PLAYABLE_RADIUS * 1.9;
+    const z = (rand() - 0.5) * WORLD_PLAYABLE_RADIUS * 1.9;
+    if (Math.hypot(x, z) > WORLD_PLAYABLE_RADIUS - 3) continue;
     if (trailFactorAt(x, z) > 0.1) continue;
     if (Math.hypot(x + 2, z - 9) < 5.5) continue;
-    if (Math.hypot(x - CABIN_X, z - CABIN_Z) < 6.8) continue;
+    if (nearAnyCabin(x, z, 7.2)) continue;
     const distRiver = Math.abs(x - riverCenterX(z)) - riverHalfWidthAt(z);
     if (distRiver < 0.8) continue;
     const y = groundHeightAt(x, z);
     if (y < WATER_LEVEL + 0.3) continue;
     dummy.position.set(x, y - 0.05, z);
     dummy.rotation.set(0, rand() * Math.PI * 2, 0);
-    const bs = 0.85 + rand() * 0.9;
-    dummy.scale.set(bs, bs * (0.85 + rand() * 0.3), bs);
+    const bs = 0.78 + rand() * 1.05;
+    dummy.scale.set(bs, bs * (0.85 + rand() * 0.35), bs);
     dummy.updateMatrix();
-    bushInst.setMatrixAt(bushesPlaced, dummy.matrix);
-    gColor.setHSL(0.25 + (rand() - 0.5) * 0.05, 0.25, 0.72 + rand() * 0.25);
-    bushInst.setColorAt(bushesPlaced, gColor);
+    const q = (x >= 0 ? 1 : 0) + (z >= 0 ? 2 : 0);
+    bushQuads[q].matrices.push(...dummy.matrix.elements);
+    gColor.setHSL(0.24 + (rand() - 0.5) * 0.06, 0.28, 0.7 + rand() * 0.28);
+    bushQuads[q].colors.push(gColor.r, gColor.g, gColor.b);
     bushesPlaced++;
   }
-  bushInst.count = bushesPlaced;
-  bushInst.instanceMatrix.needsUpdate = true;
-  if (bushInst.instanceColor) bushInst.instanceColor.needsUpdate = true;
-  bushInst.computeBoundingSphere();
-  group.add(bushInst);
+  for (const bq of bushQuads) {
+    const cnt = bq.matrices.length / 16;
+    if (cnt === 0) continue;
+    const bushInst = new THREE.InstancedMesh(bushGeo, bushMat, cnt);
+    bushInst.receiveShadow = true;
+    for (let i = 0; i < cnt; i++) {
+      m4.fromArray(bq.matrices, i * 16);
+      bushInst.setMatrixAt(i, m4);
+      gColor.setRGB(bq.colors[i * 3], bq.colors[i * 3 + 1], bq.colors[i * 3 + 2]);
+      bushInst.setColorAt(i, gColor);
+    }
+    bushInst.instanceMatrix.needsUpdate = true;
+    if (bushInst.instanceColor) bushInst.instanceColor.needsUpdate = true;
+    bushInst.computeBoundingSphere();
+    group.add(bushInst);
+  }
   disposables.push(bushGeo, bushMat);
 
   // 7. Instanced Boulders (90 boulders across the larger map)
@@ -775,7 +847,7 @@ export function buildWorldEnvironment(textures: ProceduralTextures): WorldEnviro
     const z = (rand() - 0.5) * WORLD_PLAYABLE_RADIUS * 1.85;
     if (trailFactorAt(x, z) > 0.12) continue;
     if (Math.hypot(x + 2, z - 9) < 8) continue;
-    if (Math.hypot(x - CABIN_X, z - CABIN_Z) < 10) continue;
+    if (nearAnyCabin(x, z, 11.5)) continue;
     const y = groundHeightAt(x, z);
     if (y < WATER_LEVEL - 0.3) continue;
 

@@ -8,6 +8,7 @@ import { soundEngine } from './audio';
 import { buildWorldEnvironment, WorldEnvironment } from './environment';
 import {
   buildArchedBridge,
+  buildBulletModel,
   buildCabin,
   buildCampfire,
   buildMobModel,
@@ -22,13 +23,13 @@ import {
 import {
   BRIDGE_Z,
   CABIN_ROT,
-  CABIN_X,
-  CABIN_Z,
+  CABIN_SITES,
+  CabinSite,
   cabinBaseY,
+  findInsideCabin,
   fromCabinLocal,
   getZoneName,
   groundHeightAt,
-  isInsideCabin,
   resolveCabinCollision,
   riverCenterX,
   toCabinLocal,
@@ -64,7 +65,7 @@ const FastDofShader = {
     tDepth: { value: null },
     uFocus: { value: 6.5 },
     uNear: { value: 0.15 },
-    uFar: { value: 320.0 },
+    uFar: { value: 460.0 },
     uTexel: { value: new THREE.Vector2(1 / 1280, 1 / 720) },
     uMaxBlur: { value: 4.5 },
   },
@@ -162,7 +163,7 @@ interface ResourceNodeEntity {
 }
 
 interface Projectile {
-  mesh: THREE.Mesh;
+  mesh: THREE.Object3D;
   x: number;
   y: number;
   z: number;
@@ -174,26 +175,47 @@ interface Projectile {
   knockback: number;
   gravity: number;
   color: number;
+  isBullet?: boolean;
 }
 
 interface Particle {
-  mesh: THREE.Mesh;
+  mesh: THREE.Object3D;
   vx: number;
   vy: number;
   vz: number;
   life: number;
   scale: number;
   grow: number;
+  bounce?: boolean;
+  dropBulletOnLand?: boolean;
 }
 
 interface PickupItem {
-  mesh: THREE.Mesh;
-  kind: 'coin' | 'heal';
+  mesh: THREE.Object3D;
+  kind: 'coin' | 'heal' | 'bullet';
   x: number;
   y: number;
   z: number;
   value: number;
   phase: number;
+  pickupDelay?: number;
+}
+
+interface ShockwaveFx {
+  mesh: THREE.Mesh;
+  life: number;
+  maxLife: number;
+  startScale: number;
+  maxScale: number;
+}
+
+interface CabinMount {
+  site: CabinSite;
+  roofGroup: THREE.Group;
+  hearthLight: THREE.PointLight;
+  hearthFlame: THREE.Mesh;
+  workbenchPos: THREE.Vector3;
+  bedPos: THREE.Vector3;
 }
 
 interface ChestEntity {
@@ -202,6 +224,7 @@ interface ChestEntity {
   x: number;
   z: number;
   opened: boolean;
+  indoor?: boolean;
 }
 
 const RESOURCE_LABELS: Record<Exclude<ResourceId, 'hide'>, string> = {
@@ -228,9 +251,7 @@ export class BlocklandWorld {
   private env!: WorldEnvironment;
   private playerRig!: PlayerRig;
 
-  private cabinRoofGroup!: THREE.Group;
-  private cabinHearthLight!: THREE.PointLight;
-  private workbenchPos = new THREE.Vector3();
+  private cabins: CabinMount[] = [];
 
   private isSoftwareGl = false;
   private frameId = 0;
@@ -238,11 +259,16 @@ export class BlocklandWorld {
   private clock = new THREE.Clock();
   private lastRenderMs = 0;
   private renderCount = 0;
+  private currentFps = 60;
+  private currentFrameMs = 16;
+  private fpsSamples = 0;
+  private fpsWindowStart = performance.now();
 
   private dofEnabled = true;
   private shadowUpscale = false;
   private ecoMode = true;
-  private autoFollowCam = true;
+  private autoFollowCam = false;
+  private modalOpen = false;
 
   private phase: 'title' | 'playing' | 'dead' = 'playing';
   private px = -2;
@@ -268,6 +294,7 @@ export class BlocklandWorld {
   private xpToNext = 100;
   private level = 1;
   private coins = 0;
+  private ammoBullets = 6;
   private kills = 0;
   private wave = 1;
   private hurtCooldown = 0;
@@ -289,9 +316,9 @@ export class BlocklandWorld {
   private upgrades = new Set<UpgradeId>();
   private villagerGreeted = false;
 
-  // Camera orbit state
+  // Camera orbit & bobbing state
   private camYaw = -0.18;
-  private camPitch = 0.22;
+  private camPitch = 0.24;
   private camDist = 6.2;
   private targetCamDist = 6.2;
   private isDraggingCam = false;
@@ -299,8 +326,13 @@ export class BlocklandWorld {
   private dragStartY = 0;
   private lastDragX = 0;
   private lastDragY = 0;
+  private lastHoverX: number | null = null;
+  private lastHoverY: number | null = null;
   private dragMoved = false;
   private pointerLocked = false;
+  private camBobPhase = 0;
+  private camBobAmt = 0;
+  private camLandingDip = 0;
 
   private keys: Record<string, boolean> = {};
   private touchMoveX = 0;
@@ -315,8 +347,7 @@ export class BlocklandWorld {
   private chests: ChestEntity[] = [];
   private slashArcMesh!: THREE.Mesh;
   private slashArcLife = 0;
-  private shockwaveMesh!: THREE.Mesh;
-  private shockwaveLife = 0;
+  private shockwaves: ShockwaveFx[] = [];
   private campfirePos = new THREE.Vector3(-9, 0, -14.5);
   private campfireFlame!: THREE.Mesh;
   private campfireLight!: THREE.PointLight;
@@ -331,6 +362,8 @@ export class BlocklandWorld {
   private sparkGeo = new THREE.BoxGeometry(0.16, 0.16, 0.16);
   private coinGeo = new THREE.CylinderGeometry(0.28, 0.28, 0.08, 12);
   private healGeo = new THREE.OctahedronGeometry(0.32, 0);
+  private shockwaveGeo = new THREE.RingGeometry(0.45, 1.15, 28);
+  private blastPuffMat = new THREE.MeshBasicMaterial({ color: 0xf97316, transparent: true, opacity: 0.78 });
 
   constructor(
     container: HTMLElement,
@@ -388,36 +421,36 @@ export class BlocklandWorld {
     this.scene = new THREE.Scene();
     const mistColor = new THREE.Color(0xcbdde6);
     this.scene.background = mistColor;
-    this.scene.fog = new THREE.FogExp2(0xcbdde6, 0.0072);
+    this.scene.fog = new THREE.FogExp2(0xcbdde6, 0.0046);
 
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     pmrem.dispose();
 
-    this.camera = new THREE.PerspectiveCamera(60, width / height, 0.15, 320);
+    this.camera = new THREE.PerspectiveCamera(60, width / height, 0.15, 460);
 
-    const hemi = new THREE.HemisphereLight(0xdbeafe, 0x2f461d, 0.95);
+    const hemi = new THREE.HemisphereLight(0xdbeafe, 0x1e3312, 0.56);
     this.scene.add(hemi);
 
-    this.sunLight = new THREE.DirectionalLight(0xfff0cc, 2.55);
-    this.sunLight.position.set(-22, 34, -36);
+    this.sunLight = new THREE.DirectionalLight(0xffe6b3, 3.15);
+    this.sunLight.position.set(-26, 28, -32);
     this.sunLight.castShadow = !this.isSoftwareGl;
     const shadowSize = this.shadowUpscale ? 4096 : 2048;
     this.sunLight.shadow.mapSize.set(shadowSize, shadowSize);
-    const d = 22;
+    const d = 24;
     this.sunLight.shadow.camera.left = -d;
     this.sunLight.shadow.camera.right = d;
     this.sunLight.shadow.camera.top = d;
     this.sunLight.shadow.camera.bottom = -d;
     this.sunLight.shadow.camera.near = 2;
-    this.sunLight.shadow.camera.far = 110;
-    this.sunLight.shadow.radius = 2.2;
-    this.sunLight.shadow.bias = -0.00035;
-    this.sunLight.shadow.normalBias = 0.024;
+    this.sunLight.shadow.camera.far = 115;
+    this.sunLight.shadow.radius = 1.4;
+    this.sunLight.shadow.bias = -0.00022;
+    this.sunLight.shadow.normalBias = 0.016;
     this.scene.add(this.sunLight);
     this.scene.add(this.sunLight.target);
 
-    const rimLight = new THREE.DirectionalLight(0x93c5fd, 0.5);
+    const rimLight = new THREE.DirectionalLight(0x93c5fd, 0.34);
     rimLight.position.set(28, 18, 30);
     this.scene.add(rimLight);
 
@@ -427,18 +460,38 @@ export class BlocklandWorld {
     this.env = buildWorldEnvironment(this.textures);
     this.scene.add(this.env.group);
 
-    // Enterable Cabin at (CABIN_X, cabinBaseY(), CABIN_Z)
-    const cabinVisual = buildCabin(this.textures);
-    cabinVisual.group.position.set(CABIN_X, cabinBaseY(), CABIN_Z);
-    cabinVisual.group.rotation.y = CABIN_ROT;
-    this.cabinRoofGroup = cabinVisual.roofGroup;
-    this.cabinHearthLight = cabinVisual.hearthLight;
-    this.scene.add(cabinVisual.group);
+    // Rare Enterable Cabins across the wide open valley
+    for (const site of CABIN_SITES) {
+      const cabinVisual = buildCabin(this.textures);
+      cabinVisual.group.position.set(site.x, cabinBaseY(site), site.z);
+      cabinVisual.group.rotation.y = site.rot;
+      this.scene.add(cabinVisual.group);
+      const wbWorld = fromCabinLocal(-2.1, -0.65, site);
+      const bedWorld = fromCabinLocal(2.55, -2.15, site);
+      const indoorChestWorld = fromCabinLocal(-2.75, 1.95, site);
+      this.cabins.push({
+        site,
+        roofGroup: cabinVisual.roofGroup,
+        hearthLight: cabinVisual.hearthLight,
+        hearthFlame: cabinVisual.hearthFlame,
+        workbenchPos: new THREE.Vector3(wbWorld.x, cabinBaseY(site) + 0.82, wbWorld.z),
+        bedPos: new THREE.Vector3(bedWorld.x, cabinBaseY(site) + 0.65, bedWorld.z),
+      });
+      this.chests.push({
+        group: cabinVisual.group,
+        lid: cabinVisual.indoorChestLid,
+        x: indoorChestWorld.x,
+        z: indoorChestWorld.z,
+        opened: false,
+        indoor: true,
+      });
+      if (site.id !== 'main') {
+        const porchChestPos = fromCabinLocal(5.2, 1.5, site);
+        this.createChest(porchChestPos.x, porchChestPos.z, site.rot - 0.6);
+      }
+    }
 
-    const wbWorld = fromCabinLocal(-2.1, -0.65);
-    this.workbenchPos.set(wbWorld.x, cabinBaseY() + 0.82, wbWorld.z);
-
-    // Campfire outside cabin front-right
+    // Campfire outside main cabin front-right
     const fire = buildCampfire();
     this.campfirePos.set(-7.2, groundHeightAt(-7.2, -14.5), -14.5);
     fire.group.position.copy(this.campfirePos);
@@ -486,19 +539,7 @@ export class BlocklandWorld {
     this.slashArcMesh.visible = false;
     this.scene.add(this.slashArcMesh);
 
-    this.shockwaveMesh = new THREE.Mesh(
-      new THREE.RingGeometry(0.4, 1.1, 28),
-      new THREE.MeshBasicMaterial({
-        color: 0xf59e0b,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0,
-        depthWrite: false,
-      }),
-    );
-    this.shockwaveMesh.rotation.x = -Math.PI / 2;
-    this.shockwaveMesh.visible = false;
-    this.scene.add(this.shockwaveMesh);
+    this.shockwaveGeo.rotateX(-Math.PI / 2);
 
     if (!this.isSoftwareGl) {
       this.composer = new EffectComposer(this.renderer);
@@ -602,6 +643,8 @@ export class BlocklandWorld {
       [-56, 46],
       [6, 28],
       [-8, -42],
+      [-98, 66],
+      [96, -12],
     ];
     for (const [sx, sz] of sheepSpots) {
       const vis = buildPeacefulMobModel('sheep', this.textures);
@@ -635,6 +678,8 @@ export class BlocklandWorld {
       [58, 16],
       [74, 38],
       [-74, -18],
+      [-58, -118],
+      [112, 74],
     ];
     for (const [dx, dz] of deerSpots) {
       const vis = buildPeacefulMobModel('deer', this.textures);
@@ -739,14 +784,31 @@ export class BlocklandWorld {
     const dom = this.renderer.domElement;
     dom.tabIndex = 0;
     dom.style.outline = 'none';
+    dom.style.touchAction = 'none';
     dom.focus({ preventScroll: true });
     dom.addEventListener('pointerdown', this.onPointerDown);
+    dom.addEventListener('pointerenter', this.onPointerEnter);
     window.addEventListener('pointermove', this.onPointerMove);
     window.addEventListener('pointerup', this.onPointerUp);
     dom.addEventListener('wheel', this.onWheel, { passive: false });
     dom.addEventListener('contextmenu', this.onContextMenu);
     dom.addEventListener('webglcontextlost', this.onWebglLost);
   }
+
+  public setModalOpen(open: boolean) {
+    this.modalOpen = open;
+    this.lastHoverX = null;
+    this.lastHoverY = null;
+    if (open) {
+      this.isDraggingCam = false;
+      this.keys = {};
+    }
+  }
+
+  private onPointerEnter = (e: PointerEvent) => {
+    this.lastHoverX = e.clientX;
+    this.lastHoverY = e.clientY;
+  };
 
   private onVisibilityChange = () => {
     if (!document.hidden) {
@@ -758,6 +820,8 @@ export class BlocklandWorld {
   private onWindowBlur = () => {
     this.keys = {};
     this.isDraggingCam = false;
+    this.lastHoverX = null;
+    this.lastHoverY = null;
   };
 
   private onWebglLost = (e: Event) => {
@@ -806,6 +870,7 @@ export class BlocklandWorld {
     else if (e.code === 'Digit6') this.useConsumable('tonic');
     else if (e.code === 'Digit7') this.useConsumable('stew');
     else if (e.code === 'KeyF') this.triggerAttack();
+    else if (e.code === 'KeyG') this.throwBullet();
     else if (e.code === 'KeyE') this.interactNearby();
     else if (e.code === 'KeyL') this.toggleCameraMode();
     else if (e.code === 'KeyR') this.teleportToCabin();
@@ -827,6 +892,7 @@ export class BlocklandWorld {
 
     if (this.pointerLocked) {
       if (e.button === 0) this.triggerAttack();
+      else if (e.button === 2) this.throwBullet();
       return;
     }
 
@@ -845,22 +911,44 @@ export class BlocklandWorld {
       this.camPitch = THREE.MathUtils.clamp(this.camPitch + e.movementY * 0.0028, -0.15, 1.15);
       return;
     }
-    if (!this.isDraggingCam) return;
-    const dx = e.clientX - this.lastDragX;
-    const dy = e.clientY - this.lastDragY;
-    this.lastDragX = e.clientX;
-    this.lastDragY = e.clientY;
+    if (this.isDraggingCam) {
+      const dx = e.clientX - this.lastDragX;
+      const dy = e.clientY - this.lastDragY;
+      this.lastDragX = e.clientX;
+      this.lastDragY = e.clientY;
+      this.lastHoverX = e.clientX;
+      this.lastHoverY = e.clientY;
 
-    if (Math.hypot(e.clientX - this.dragStartX, e.clientY - this.dragStartY) > 5) {
-      this.dragMoved = true;
+      if (Math.hypot(e.clientX - this.dragStartX, e.clientY - this.dragStartY) > 5) {
+        this.dragMoved = true;
+      }
+      this.camYaw -= dx * 0.0068;
+      this.camPitch = THREE.MathUtils.clamp(this.camPitch + dy * 0.0052, -0.15, 1.15);
+      return;
     }
-    this.camYaw -= dx * 0.0068;
-    this.camPitch = THREE.MathUtils.clamp(this.camPitch + dy * 0.0052, -0.15, 1.15);
+
+    // Free mouse camera look when hovering over the game canvas without modals open
+    if (!this.modalOpen && e.pointerType !== 'touch' && e.target === this.renderer.domElement) {
+      if (this.lastHoverX !== null && this.lastHoverY !== null) {
+        const dx = e.clientX - this.lastHoverX;
+        const dy = e.clientY - this.lastHoverY;
+        if (Math.abs(dx) + Math.abs(dy) < 160) {
+          this.camYaw -= dx * 0.0044;
+          this.camPitch = THREE.MathUtils.clamp(this.camPitch + dy * 0.0034, -0.15, 1.15);
+        }
+      }
+      this.lastHoverX = e.clientX;
+      this.lastHoverY = e.clientY;
+    } else {
+      this.lastHoverX = null;
+      this.lastHoverY = null;
+    }
   };
 
   private onPointerUp = (e: PointerEvent) => {
-    if (this.isDraggingCam && !this.dragMoved && e.button === 0 && this.phase === 'playing') {
-      this.triggerAttack();
+    if (this.isDraggingCam && !this.dragMoved && this.phase === 'playing') {
+      if (e.button === 0) this.triggerAttack();
+      else if (e.button === 2) this.throwBullet();
     }
     this.isDraggingCam = false;
   };
@@ -917,6 +1005,9 @@ export class BlocklandWorld {
 
   public setWeapon(id: WeaponId) {
     soundEngine.unlock();
+    if (this.activeWeapon !== id) {
+      soundEngine.playEquip(id);
+    }
     this.activeWeapon = id;
     (Object.keys(this.playerRig.weapons) as WeaponId[]).forEach((wId) => {
       this.playerRig.weapons[wId].visible = wId === id;
@@ -1031,7 +1122,173 @@ export class BlocklandWorld {
     if (this.grounded) {
       this.pvy = 9.4;
       this.grounded = false;
-      soundEngine.playJump();
+      soundEngine.playJumpFart();
+      this.spawnJumpBullets();
+    }
+  }
+
+  private spawnJumpBullets() {
+    const backX = -Math.sin(this.playerYaw);
+    const backZ = -Math.cos(this.playerYaw);
+    const startX = this.px + backX * 0.45;
+    const startY = this.py + 0.9;
+    const startZ = this.pz + backZ * 0.45;
+
+    // 3 explosive brass/orange bullets shooting backward; leave shockwave & pickup on landing
+    for (let i = 0; i < 3; i++) {
+      const mesh = buildBulletModel(0.92);
+      mesh.position.set(
+        startX + (Math.random() - 0.5) * 0.22,
+        startY + (Math.random() - 0.5) * 0.14,
+        startZ + (Math.random() - 0.5) * 0.22,
+      );
+      mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+      this.scene.add(mesh);
+
+      const spread = (Math.random() - 0.5) * 0.85;
+      const dirX = backX + backZ * spread;
+      const dirZ = backZ - backX * spread;
+      const spd = 4.0 + Math.random() * 2.8;
+      this.particles.push({
+        mesh,
+        vx: dirX * spd,
+        vy: 1.8 + Math.random() * 2.0,
+        vz: dirZ * spd,
+        life: 3.5,
+        scale: 1.0,
+        grow: 0,
+        bounce: true,
+        dropBulletOnLand: true,
+      });
+    }
+
+    // Glowing orange shockwave blast puffs
+    for (let i = 0; i < 6; i++) {
+      const mesh = new THREE.Mesh(this.sparkGeo, this.blastPuffMat);
+      mesh.position.set(startX, startY, startZ);
+      this.scene.add(mesh);
+      const spread = (Math.random() - 0.5) * 1.1;
+      this.particles.push({
+        mesh,
+        vx: (backX + backZ * spread) * (2.2 + Math.random() * 2.2),
+        vy: -0.2 + Math.random() * 1.5,
+        vz: (backZ - backX * spread) * (2.2 + Math.random() * 2.2),
+        life: 0.4 + Math.random() * 0.22,
+        scale: 1.0 + Math.random() * 0.55,
+        grow: 1.9,
+      });
+    }
+  }
+
+  public throwBullet() {
+    soundEngine.unlock();
+    if (this.phase === 'title') this.startGame();
+    if (this.phase !== 'playing') return;
+
+    if (this.ammoBullets <= 0) {
+      this.pushFeed('Немає куль — підберіть кулі після стрибка (Пробіл)!');
+      this.emitHud();
+      return;
+    }
+
+    this.ammoBullets--;
+    this.attackAnim = 0.85;
+    this.playerYaw = this.camYaw + Math.PI;
+    soundEngine.playBlasterShot();
+
+    const dirX = -Math.sin(this.camYaw) * Math.cos(this.camPitch * 0.42);
+    const dirY = -Math.sin(this.camPitch * 0.42) + 0.14;
+    const dirZ = -Math.cos(this.camYaw) * Math.cos(this.camPitch * 0.42);
+    _v1.set(dirX, dirY, dirZ).normalize();
+
+    const mesh = buildBulletModel(1.25);
+    const startX = this.px + _v1.x * 1.0;
+    const startY = this.py + 1.55;
+    const startZ = this.pz + _v1.z * 1.0;
+    mesh.position.set(startX, startY, startZ);
+    mesh.lookAt(startX + _v1.x, startY + _v1.y, startZ + _v1.z);
+    this.scene.add(mesh);
+
+    const speed = 27;
+    this.projectiles.push({
+      mesh,
+      x: startX,
+      y: startY,
+      z: startZ,
+      vx: _v1.x * speed,
+      vy: _v1.y * speed,
+      vz: _v1.z * speed,
+      life: 2.2,
+      damage: 54,
+      knockback: 15,
+      gravity: 10.5,
+      color: 0xff5a1f,
+      isBullet: true,
+    });
+
+    this.emitHud();
+  }
+
+  private spawnShockwave(x: number, y: number, z: number, color: number, maxScale: number, duration: number) {
+    const mat = new THREE.MeshBasicMaterial({
+      color,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(this.shockwaveGeo, mat);
+    mesh.position.set(x, y, z);
+    mesh.scale.setScalar(0.35);
+    this.scene.add(mesh);
+    this.shockwaves.push({
+      mesh,
+      life: duration,
+      maxLife: duration,
+      startScale: 0.35,
+      maxScale,
+    });
+  }
+
+  private detonateBullet(x: number, y: number, z: number, radius: number, damage: number, big: boolean) {
+    soundEngine.playExplosion();
+    this.spawnShockwave(x, y + 0.12, z, 0xf97316, big ? 5.2 : 2.8, big ? 0.38 : 0.28);
+    if (big) {
+      this.spawnShockwave(x, y + 0.18, z, 0xfef08a, 3.2, 0.24);
+    }
+    this.spawnBurst(x, y + 0.45, z, 0xf97316, big ? 18 : 8);
+    this.spawnBurst(x, y + 0.65, z, 0xfef08a, big ? 10 : 5);
+
+    let anyHit = false;
+    for (let i = this.mobs.length - 1; i >= 0; i--) {
+      const m = this.mobs[i];
+      const dx = m.x - x;
+      const dz = m.z - z;
+      const dist = Math.hypot(dx, dz);
+      const def = MOB_DEFS[m.kind];
+      if (dist <= radius + def.radius) {
+        anyHit = true;
+        this.damageMob(m, i, damage, dx, dz, dist, big ? 15 : 8, 0xff5a1f);
+      }
+    }
+    if (anyHit) {
+      soundEngine.playHit(big);
+    }
+
+    // Shockwave startles and scatters peaceful mobs too!
+    for (const pm of this.peacefulMobs) {
+      if (pm.kind === 'villager') continue;
+      const dx = pm.x - x;
+      const dz = pm.z - z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < radius + 4.5) {
+        pm.fleeTimer = 3.5;
+        pm.wanderAngle = dist > 0.05 ? Math.atan2(dx, dz) : Math.random() * Math.PI * 2;
+      }
+    }
+
+    if (big) {
+      this.hitResourceNodesNear(x, z, 2.8);
     }
   }
 
@@ -1068,7 +1325,7 @@ export class BlocklandWorld {
       }
     }
 
-    soundEngine.playPickup();
+    soundEngine.playCraft();
     this.spawnBurst(this.px, this.py + 1.4, this.pz, 0x38bdf8, 16);
     this.pushFeed(`Створено: ${recipe.name}`);
     this.emitHud();
@@ -1131,27 +1388,44 @@ export class BlocklandWorld {
   public interactNearby() {
     soundEngine.unlock();
 
-    // 1. Open nearby chest
+    // 1. Open nearby chest (outdoor or cabin indoor supply chest)
     for (const chest of this.chests) {
       if (!chest.opened && Math.hypot(this.px - chest.x, this.pz - chest.z) < 3.4) {
         chest.opened = true;
         chest.lid.rotation.x = -0.85;
-        chest.lid.position.set(0, 1.08, -0.35);
+        if (chest.indoor) {
+          chest.lid.position.set(0, 0.88, -0.25);
+        } else {
+          chest.lid.position.set(0, 1.08, -0.35);
+        }
         this.coins += 50;
         this.resources.iron += 2;
         this.resources.hide += 1;
         this.resources.essence += 1;
+        this.ammoBullets += 2;
         this.hp = Math.min(this.maxHp, this.hp + 35);
         this.grantXp(45);
         soundEngine.playPickup();
-        this.spawnBurst(chest.x, groundHeightAt(chest.x, chest.z) + 1.0, chest.z, 0xfbbf24, 14);
-        this.pushFeed('Скриня: +50 мон., +2 Залізо, +1 Шкіра, +1 Есенція');
+        this.spawnBurst(chest.x, walkableHeightAt(chest.x, chest.z) + 1.0, chest.z, 0xfbbf24, 14);
+        this.pushFeed('Скриня: +50 мон., +2 Залізо, +1 Шкіра, +1 Есенція, +2 Кулі');
         this.emitHud();
         return;
       }
     }
 
-    // 2. Harvest nearby resource node
+    // 2. Rest on cabin bed (full heal + stamina + bonus bullets)
+    if (this.cabins.some((c) => Math.hypot(this.px - c.bedPos.x, this.pz - c.bedPos.z) < 2.8)) {
+      this.hp = this.maxHp;
+      this.stamina = this.maxStamina;
+      this.ammoBullets = Math.max(this.ammoBullets, 4) + 2;
+      soundEngine.playPickup();
+      this.spawnBurst(this.px, this.py + 1.2, this.pz, 0xfde047, 16);
+      this.pushFeed('Відпочили на ліжку в хатинці: повне HP, витривалість та +2 кулі!');
+      this.emitHud();
+      return;
+    }
+
+    // 3. Harvest nearby resource node
     for (const node of this.resourceNodes) {
       if (node.available && Math.hypot(this.px - node.x, this.pz - node.z) < 3.2) {
         this.harvestResourceNode(node);
@@ -1159,8 +1433,8 @@ export class BlocklandWorld {
       }
     }
 
-    // 3. Use Cabin Workbench
-    if (Math.hypot(this.px - this.workbenchPos.x, this.pz - this.workbenchPos.z) < 2.9) {
+    // 4. Use Any Cabin Workbench
+    if (this.cabins.some((c) => Math.hypot(this.px - c.workbenchPos.x, this.pz - c.workbenchPos.z) < 2.9)) {
       this.onOpenCraftCb?.();
       return;
     }
@@ -1298,10 +1572,7 @@ export class BlocklandWorld {
       soundEngine.playHammerSlam();
       const impactX = this.px + aimX * 1.65;
       const impactZ = this.pz + aimZ * 1.65;
-      this.shockwaveMesh.visible = true;
-      this.shockwaveMesh.position.set(impactX, walkableHeightAt(impactX, impactZ, this.py) + 0.12, impactZ);
-      this.shockwaveMesh.scale.setScalar(0.5);
-      this.shockwaveLife = 0.28;
+      this.spawnShockwave(impactX, walkableHeightAt(impactX, impactZ, this.py) + 0.12, impactZ, 0xf59e0b, 4.3, 0.28);
 
       this.hitMobsInArc(impactX, impactZ, aimX, aimZ, w.range, -1.0, w.damage, w.knockback, 0xf59e0b);
       this.hitResourceNodesNear(impactX, impactZ, 2.8);
@@ -1482,28 +1753,34 @@ export class BlocklandWorld {
     this.emitHud();
   }
 
-  private spawnPickup(kind: 'coin' | 'heal', x: number, z: number, value: number) {
-    const mat =
-      kind === 'coin'
-        ? new THREE.MeshStandardMaterial({
-            color: 0xfacc15,
-            emissive: 0xca8a04,
-            emissiveIntensity: 0.5,
-            metalness: 0.85,
-            roughness: 0.2,
-          })
-        : new THREE.MeshStandardMaterial({
-            color: 0x4ade80,
-            emissive: 0x16a34a,
-            emissiveIntensity: 0.7,
-            roughness: 0.2,
-          });
-    const mesh = new THREE.Mesh(kind === 'coin' ? this.coinGeo : this.healGeo, mat);
-    const y = groundHeightAt(x, z) + 0.65;
+  private spawnPickup(kind: 'coin' | 'heal' | 'bullet', x: number, z: number, value: number, pickupDelay = 0) {
+    let mesh: THREE.Object3D;
+    if (kind === 'bullet') {
+      mesh = buildBulletModel(1.1);
+      mesh.rotation.x = -0.35;
+    } else {
+      const mat =
+        kind === 'coin'
+          ? new THREE.MeshStandardMaterial({
+              color: 0xfacc15,
+              emissive: 0xca8a04,
+              emissiveIntensity: 0.5,
+              metalness: 0.85,
+              roughness: 0.2,
+            })
+          : new THREE.MeshStandardMaterial({
+              color: 0x4ade80,
+              emissive: 0x16a34a,
+              emissiveIntensity: 0.7,
+              roughness: 0.2,
+            });
+      mesh = new THREE.Mesh(kind === 'coin' ? this.coinGeo : this.healGeo, mat);
+      if (kind === 'coin') mesh.rotation.x = Math.PI * 0.5;
+    }
+    const y = walkableHeightAt(x, z) + 0.65;
     mesh.position.set(x, y, z);
-    if (kind === 'coin') mesh.rotation.x = Math.PI * 0.5;
     this.scene.add(mesh);
-    this.pickups.push({ mesh, kind, x, y, z, value, phase: Math.random() * 6 });
+    this.pickups.push({ mesh, kind, x, y, z, value, phase: Math.random() * 6, pickupDelay });
   }
 
   private spawnBurst(x: number, y: number, z: number, color: number, count: number) {
@@ -1556,12 +1833,14 @@ export class BlocklandWorld {
     if (allowCabinInterior) {
       [rx, rz] = resolveCabinCollision(rx, rz, radius);
     } else {
-      const { lx, lz } = toCabinLocal(rx, rz);
-      if (Math.abs(lx) < 4.8 && Math.abs(lz) < 4.2) {
-        const pushX = lx >= 0 ? 4.8 : -4.8;
-        const worldOut = fromCabinLocal(pushX, lz);
-        rx = worldOut.x;
-        rz = worldOut.z;
+      for (const site of CABIN_SITES) {
+        const { lx, lz } = toCabinLocal(rx, rz, site);
+        if (Math.abs(lx) < 4.8 && Math.abs(lz) < 4.2) {
+          const pushX = lx >= 0 ? 4.8 : -4.8;
+          const worldOut = fromCabinLocal(pushX, lz, site);
+          rx = worldOut.x;
+          rz = worldOut.z;
+        }
       }
     }
 
@@ -1605,8 +1884,8 @@ export class BlocklandWorld {
         return;
       }
 
+      const now = performance.now();
       if (!this.isSoftwareGl && this.ecoMode) {
-        const now = performance.now();
         if (now - this.lastRenderMs < 15.8) {
           this.frameId = requestAnimationFrame(tick);
           return;
@@ -1619,8 +1898,17 @@ export class BlocklandWorld {
 
       this.update(dt, elapsed);
 
+      this.fpsSamples++;
+      const fpsElapsed = now - this.fpsWindowStart;
+      if (fpsElapsed >= 450) {
+        this.currentFps = Math.max(1, Math.round((this.fpsSamples * 1000) / fpsElapsed));
+        this.currentFrameMs = Math.max(1, Math.round(fpsElapsed / this.fpsSamples));
+        this.fpsSamples = 0;
+        this.fpsWindowStart = now;
+      }
+
       this.renderCount++;
-      if (!this.isSoftwareGl && (!this.ecoMode || this.renderCount % 2 === 1)) {
+      if (!this.isSoftwareGl) {
         this.renderer.shadowMap.needsUpdate = true;
       }
 
@@ -1656,7 +1944,14 @@ export class BlocklandWorld {
       1 + Math.sin(elapsed * 14) * 0.12,
     );
     this.campfireLight.intensity = 5.2 + Math.sin(elapsed * 12) * 0.9;
-    this.cabinHearthLight.intensity = 4.2 + Math.cos(elapsed * 10) * 0.7;
+    this.cabins.forEach((c, idx) => {
+      c.hearthLight.intensity = 4.6 + Math.cos(elapsed * 10 + idx * 1.7) * 0.85;
+      c.hearthFlame.scale.set(
+        1 + Math.sin(elapsed * 13 + idx) * 0.14,
+        1 + Math.cos(elapsed * 11 + idx * 1.3) * 0.2,
+        1 + Math.sin(elapsed * 13 + idx) * 0.14,
+      );
+    });
 
     if (this.ruinCrystal) {
       this.ruinCrystal.rotation.y += dt * 1.2;
@@ -1680,7 +1975,7 @@ export class BlocklandWorld {
       this.camYaw = -0.18 + Math.sin(elapsed * 0.22) * 0.25;
       this.camPitch = 0.22;
       this.camDist = 6.2;
-      this.updateCamera(dt);
+      this.updateCamera(dt, elapsed);
       this.playerRig.root.position.set(this.px, this.py, this.pz);
       return;
     }
@@ -1695,9 +1990,9 @@ export class BlocklandWorld {
     this.updatePickups(dt, elapsed);
     this.updateParticles(dt);
     this.updateEffects(dt);
-    this.updateCamera(dt);
+    this.updateCamera(dt, elapsed);
 
-    this.sunLight.position.set(this.px - 22, 34, this.pz - 36);
+    this.sunLight.position.set(this.px - 26, 28, this.pz - 32);
     this.sunLight.target.position.set(this.px, this.py, this.pz);
 
     if (this.mobs.length === 0 && this.phase === 'playing') {
@@ -1777,9 +2072,13 @@ export class BlocklandWorld {
     this.px = cx;
     this.pz = cz;
 
-    this.insideCabin = isInsideCabin(this.px, this.pz);
-    this.cabinRoofGroup.visible = !this.insideCabin;
+    const insideSite = findInsideCabin(this.px, this.pz);
+    this.insideCabin = insideSite !== null;
+    for (const c of this.cabins) {
+      c.roofGroup.visible = insideSite?.id !== c.site.id;
+    }
 
+    const wasGrounded = this.grounded;
     const surfaceY = walkableHeightAt(this.px, this.pz, this.py);
     const wasInWater = this.inWater;
     this.inWater = surfaceY < WATER_LEVEL - 0.15 && this.py < WATER_LEVEL + 0.15;
@@ -1810,6 +2109,10 @@ export class BlocklandWorld {
       }
     }
 
+    if (!wasGrounded && this.grounded && !this.inWater) {
+      this.camLandingDip = 0.24;
+    }
+
     // Warm campfire or indoor hearth gently heals the hero
     if (
       (Math.hypot(this.px - this.campfirePos.x, this.pz - this.campfirePos.z) < 4.5 || this.insideCabin) &&
@@ -1822,6 +2125,13 @@ export class BlocklandWorld {
     if (speedHoriz > 0.4) {
       this.walkPhase += dt * (sprinting ? 14 : 10);
     }
+    const targetBobAmt =
+      this.grounded && speedHoriz > 0.5 ? (sprinting ? 1.18 : 0.72) : this.inWater && speedHoriz > 0.4 ? 0.55 : 0;
+    this.camBobAmt = THREE.MathUtils.damp(this.camBobAmt, targetBobAmt, 9, dt);
+    if (speedHoriz > 0.4) {
+      this.camBobPhase += dt * (sprinting ? 10.5 : 7.8);
+    }
+    this.camLandingDip = THREE.MathUtils.damp(this.camLandingDip, 0, 11, dt);
 
     const rig = this.playerRig;
     rig.root.position.set(this.px, this.py, this.pz);
@@ -2071,26 +2381,43 @@ export class BlocklandWorld {
       p.y += p.vy * dt;
       p.z += p.vz * dt;
       p.mesh.position.set(p.x, p.y, p.z);
+      if (p.isBullet) {
+        p.mesh.lookAt(p.x + p.vx, p.y + p.vy, p.z + p.vz);
+      }
 
-      let remove = p.life <= 0 || p.y < groundHeightAt(p.x, p.z);
-      if (!remove) {
+      const floorY = walkableHeightAt(p.x, p.z);
+      let hitGround = p.life <= 0 || p.y <= Math.max(floorY, WATER_LEVEL - 0.15);
+      let hitMob = false;
+
+      if (!hitGround) {
         for (let mIdx = this.mobs.length - 1; mIdx >= 0; mIdx--) {
           const m = this.mobs[mIdx];
           const def = MOB_DEFS[m.kind];
           const distXZ = Math.hypot(m.x - p.x, m.z - p.z);
-          if (distXZ <= def.radius + 0.35 && p.y >= m.y && p.y <= m.y + def.height + 0.4) {
-            soundEngine.playHit(false);
-            this.damageMob(m, mIdx, p.damage, p.vx, p.vz, Math.hypot(p.vx, p.vz), p.knockback, p.color);
-            remove = true;
+          if (distXZ <= def.radius + (p.isBullet ? 0.55 : 0.35) && p.y >= m.y && p.y <= m.y + def.height + 0.5) {
+            hitMob = true;
+            if (!p.isBullet) {
+              soundEngine.playHit(false);
+              this.damageMob(m, mIdx, p.damage, p.vx, p.vz, Math.hypot(p.vx, p.vz), p.knockback, p.color);
+            }
             break;
           }
         }
       }
 
-      if (remove) {
+      if (hitGround || hitMob) {
+        if (p.isBullet) {
+          this.detonateBullet(p.x, Math.max(floorY, p.y), p.z, 5.4, p.damage, true);
+        }
         this.scene.remove(p.mesh);
-        p.mesh.geometry.dispose();
-        (p.mesh.material as THREE.Material).dispose();
+        p.mesh.traverse((obj) => {
+          const m = obj as THREE.Mesh;
+          if (m.geometry) m.geometry.dispose();
+          if (m.material) {
+            const mats = Array.isArray(m.material) ? m.material : [m.material];
+            mats.forEach((mt) => mt.dispose());
+          }
+        });
         this.projectiles.splice(i, 1);
       }
     }
@@ -2099,29 +2426,40 @@ export class BlocklandWorld {
   private updatePickups(dt: number, elapsed: number) {
     for (let i = this.pickups.length - 1; i >= 0; i--) {
       const item = this.pickups[i];
+      if (item.pickupDelay && item.pickupDelay > 0) {
+        item.pickupDelay = Math.max(0, item.pickupDelay - dt);
+      }
       item.mesh.rotation.y += dt * 3.0;
       item.mesh.position.y = item.y + Math.sin(elapsed * 4 + item.phase) * 0.14;
 
       const dx = this.px - item.x;
       const dz = this.pz - item.z;
       const d = Math.hypot(dx, dz);
-      if (d < 4.5 && d > 0.1) {
+      if ((!item.pickupDelay || item.pickupDelay <= 0) && d < 4.5 && d > 0.1) {
         item.x += (dx / d) * 9 * dt;
         item.z += (dz / d) * 9 * dt;
-        item.y = groundHeightAt(item.x, item.z) + 0.65;
+        item.y = walkableHeightAt(item.x, item.z) + 0.65;
         item.mesh.position.x = item.x;
         item.mesh.position.z = item.z;
       }
 
-      if (d < 1.25) {
+      if ((!item.pickupDelay || item.pickupDelay <= 0) && d < 1.25) {
         if (item.kind === 'coin') {
           this.coins += item.value;
-        } else {
+        } else if (item.kind === 'heal') {
           this.hp = Math.min(this.maxHp, this.hp + item.value);
+        } else {
+          this.ammoBullets += item.value;
         }
         soundEngine.playPickup();
         this.scene.remove(item.mesh);
-        (item.mesh.material as THREE.Material).dispose();
+        item.mesh.traverse((obj) => {
+          const m = obj as THREE.Mesh;
+          if (m.material) {
+            const mats = Array.isArray(m.material) ? m.material : [m.material];
+            mats.forEach((mt) => mt.dispose());
+          }
+        });
         this.pickups.splice(i, 1);
         this.emitHud();
       }
@@ -2132,10 +2470,30 @@ export class BlocklandWorld {
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const pt = this.particles[i];
       pt.life -= dt;
-      pt.vy -= 12 * dt;
+      pt.vy -= 14 * dt;
       pt.mesh.position.x += pt.vx * dt;
       pt.mesh.position.y += pt.vy * dt;
       pt.mesh.position.z += pt.vz * dt;
+      if (pt.bounce) {
+        const floorY = walkableHeightAt(pt.mesh.position.x, pt.mesh.position.z) + 0.12;
+        if (pt.mesh.position.y < floorY) {
+          if (pt.dropBulletOnLand) {
+            const lx = pt.mesh.position.x;
+            const lz = pt.mesh.position.z;
+            this.detonateBullet(lx, floorY, lz, 2.7, 16, false);
+            this.spawnPickup('bullet', lx, lz, 1, 0.35);
+            this.scene.remove(pt.mesh);
+            this.particles.splice(i, 1);
+            continue;
+          }
+          pt.mesh.position.y = floorY;
+          pt.vy = Math.abs(pt.vy) * 0.38;
+          pt.vx *= 0.65;
+          pt.vz *= 0.65;
+        }
+        pt.mesh.rotation.x += dt * 5;
+        pt.mesh.rotation.z += dt * 4;
+      }
       pt.scale = Math.max(0.01, pt.scale + pt.grow * dt);
       pt.mesh.scale.setScalar(pt.scale);
 
@@ -2154,16 +2512,21 @@ export class BlocklandWorld {
       this.slashArcMesh.scale.setScalar(1.0 + (1 - t) * 0.35);
       if (this.slashArcLife <= 0) this.slashArcMesh.visible = false;
     }
-    if (this.shockwaveLife > 0) {
-      this.shockwaveLife -= dt;
-      const t = Math.max(0, this.shockwaveLife / 0.28);
-      (this.shockwaveMesh.material as THREE.MeshBasicMaterial).opacity = t * 0.85;
-      this.shockwaveMesh.scale.setScalar(0.5 + (1 - t) * 3.8);
-      if (this.shockwaveLife <= 0) this.shockwaveMesh.visible = false;
+    for (let i = this.shockwaves.length - 1; i >= 0; i--) {
+      const sw = this.shockwaves[i];
+      sw.life -= dt;
+      const progress = 1 - Math.max(0, sw.life / sw.maxLife);
+      (sw.mesh.material as THREE.MeshBasicMaterial).opacity = (1 - progress) * 0.88;
+      sw.mesh.scale.setScalar(sw.startScale + progress * (sw.maxScale - sw.startScale));
+      if (sw.life <= 0) {
+        this.scene.remove(sw.mesh);
+        (sw.mesh.material as THREE.Material).dispose();
+        this.shockwaves.splice(i, 1);
+      }
     }
   }
 
-  private updateCamera(dt: number) {
+  private updateCamera(dt: number, elapsed: number) {
     const goalDist = this.insideCabin ? Math.min(this.targetCamDist, 4.4) : this.targetCamDist;
     this.camDist = THREE.MathUtils.damp(this.camDist, goalDist, 12, dt);
 
@@ -2171,16 +2534,35 @@ export class BlocklandWorld {
     const horizDist = Math.cos(effectivePitch) * this.camDist;
     const vertOffset = Math.sin(effectivePitch) * this.camDist + (this.insideCabin ? 2.45 : 1.85);
 
-    const targetX = this.px + Math.sin(this.camYaw) * horizDist;
-    const targetZ = this.pz + Math.cos(this.camYaw) * horizDist;
+    // Organic walking/sprinting figure-8 bobbing + gentle idle breathing & swim sway
+    const walkBobY = Math.sin(this.camBobPhase * 2) * 0.11 * this.camBobAmt;
+    const walkBobSide = Math.cos(this.camBobPhase) * 0.085 * this.camBobAmt;
+    const idleSwayY = Math.sin(elapsed * 1.45) * 0.035;
+    const idleSwaySide = Math.cos(elapsed * 0.95) * 0.025;
+    const swimBob = this.inWater ? Math.sin(elapsed * 3.1) * 0.08 : 0;
+
+    const totalBobY = walkBobY + idleSwayY + swimBob - this.camLandingDip;
+    const totalBobSide = walkBobSide + idleSwaySide;
+
+    const rightX = Math.cos(this.camYaw);
+    const rightZ = -Math.sin(this.camYaw);
+
+    const targetX = this.px + Math.sin(this.camYaw) * horizDist + rightX * totalBobSide;
+    const targetZ = this.pz + Math.cos(this.camYaw) * horizDist + rightZ * totalBobSide;
     const groundAtCam = groundHeightAt(targetX, targetZ);
-    const targetY = Math.max(groundAtCam + 0.75, this.py + vertOffset);
+    const targetY = Math.max(groundAtCam + 0.75, this.py + vertOffset + totalBobY);
 
     _camGoal.set(targetX, targetY, targetZ);
     this.camera.position.lerp(_camGoal, 1 - Math.exp(-16 * dt));
 
-    _lookTarget.set(this.px, this.py + 1.68, this.pz);
+    _lookTarget.set(
+      this.px + rightX * totalBobSide * 0.45,
+      this.py + 1.68 + totalBobY * 0.55,
+      this.pz + rightZ * totalBobSide * 0.45,
+    );
     this.camera.lookAt(_lookTarget);
+    // Subtle horizon roll during steps & turns
+    this.camera.rotateZ(Math.cos(this.camBobPhase) * 0.0085 * this.camBobAmt);
 
     if (this.dofPass && this.dofEnabled) {
       const focusDist = this.camera.position.distanceTo(_lookTarget);
@@ -2194,7 +2576,12 @@ export class BlocklandWorld {
     const nearChest = this.chests.some(
       (c) => !c.opened && Math.hypot(this.px - c.x, this.pz - c.z) < 3.4,
     );
-    const nearWorkbench = Math.hypot(this.px - this.workbenchPos.x, this.pz - this.workbenchPos.z) < 2.9;
+    const nearBed = this.cabins.some(
+      (c) => Math.hypot(this.px - c.bedPos.x, this.pz - c.bedPos.z) < 2.8,
+    );
+    const nearWorkbench = this.cabins.some(
+      (c) => Math.hypot(this.px - c.workbenchPos.x, this.pz - c.workbenchPos.z) < 2.9,
+    );
     const nearNode = this.resourceNodes.find(
       (n) => n.available && Math.hypot(this.px - n.x, this.pz - n.z) < 3.2,
     );
@@ -2215,12 +2602,14 @@ export class BlocklandWorld {
       wave: this.wave,
       activeMobs: this.mobs.length,
       peacefulMobs: this.peacefulMobs.length,
+      ammoBullets: this.ammoBullets,
       activeWeapon: this.activeWeapon,
       weaponCooldownRatio: Math.min(1, this.attackCooldown / w.cooldown),
       zoneName: getZoneName(this.px, this.pz),
       insideCabin: this.insideCabin,
       nearCampfire,
       nearChest,
+      nearBed,
       nearWorkbench,
       nearResourceLabel: nearNode ? nearNode.label : null,
       nearVillager,
@@ -2231,6 +2620,8 @@ export class BlocklandWorld {
       shadowUpscale: this.shadowUpscale,
       ecoMode: this.ecoMode,
       muted: soundEngine.muted,
+      fps: this.currentFps,
+      frameMs: this.currentFrameMs,
       resources: { ...this.resources },
       consumables: { ...this.consumables },
       upgrades: Array.from(this.upgrades),
@@ -2254,6 +2645,7 @@ export class BlocklandWorld {
 
     const dom = this.renderer.domElement;
     dom.removeEventListener('pointerdown', this.onPointerDown);
+    dom.removeEventListener('pointerenter', this.onPointerEnter);
     dom.removeEventListener('wheel', this.onWheel);
     dom.removeEventListener('contextmenu', this.onContextMenu);
     dom.removeEventListener('webglcontextlost', this.onWebglLost);
@@ -2264,6 +2656,8 @@ export class BlocklandWorld {
     this.sparkGeo.dispose();
     this.coinGeo.dispose();
     this.healGeo.dispose();
+    this.shockwaveGeo.dispose();
+    this.blastPuffMat.dispose();
     this.renderer.dispose();
     if (dom.parentElement === this.container) {
       this.container.removeChild(dom);

@@ -23,13 +23,21 @@ import {
   FlaskConical,
   MessageCircle,
   Pickaxe,
+  Flame,
+  BedDouble,
+  Activity,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { ConsumableId, GameHudState, MobKind, WeaponId, WEAPONS } from '../game/types';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface GameHudProps {
   hud: GameHudState;
   inventoryTab: 'inventory' | 'craft' | null;
   onOpenInventory: (tab: 'inventory' | 'craft') => void;
+  onHelpOpenChange?: (open: boolean) => void;
+  onInstallModalChange?: (open: boolean) => void;
   onUseConsumable: (id: ConsumableId) => void;
   onStart: () => void;
   onRespawn: () => void;
@@ -44,6 +52,7 @@ interface GameHudProps {
   onTeleportRiver: () => void;
   onInteract: () => void;
   onAttack: () => void;
+  onThrowBullet: () => void;
   onJump: () => void;
   onTouchMove: (x: number, z: number) => void;
 }
@@ -70,6 +79,8 @@ export const GameHud: React.FC<GameHudProps> = ({
   hud,
   inventoryTab,
   onOpenInventory,
+  onHelpOpenChange,
+  onInstallModalChange,
   onUseConsumable,
   onStart,
   onRespawn,
@@ -84,15 +95,45 @@ export const GameHud: React.FC<GameHudProps> = ({
   onTeleportRiver,
   onInteract,
   onAttack,
+  onThrowBullet,
   onJump,
   onTouchMove,
 }) => {
   const [dockCollapsed, setDockCollapsed] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [touchMode, setTouchMode] = useState(false);
+  const [fpsVisible, setFpsVisible] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches) {
+    const onFsChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen?.();
+      } else {
+        await document.exitFullscreen?.();
+      }
+    } catch {
+      // Ignore browsers that block fullscreen
+    }
+  };
+
+  useEffect(() => {
+    onHelpOpenChange?.(showHelp);
+  }, [showHelp, onHelpOpenChange]);
+
+  useEffect(() => {
+    if (
+      typeof window !== 'undefined' &&
+      (window.matchMedia?.('(pointer: coarse)').matches ||
+        'ontouchstart' in window ||
+        navigator.maxTouchPoints > 0)
+    ) {
       setTouchMode(true);
     }
   }, []);
@@ -103,6 +144,7 @@ export const GameHud: React.FC<GameHudProps> = ({
 
   const hasInteractivePrompt =
     hud.nearChest ||
+    hud.nearBed ||
     hud.nearWorkbench ||
     hud.nearVillager ||
     Boolean(hud.nearResourceLabel) ||
@@ -116,72 +158,115 @@ export const GameHud: React.FC<GameHudProps> = ({
       <div className="flex items-start justify-between gap-3">
         {/* Top-Left Circular Action Bar + Hero Card */}
         <div className="pointer-events-auto flex flex-col gap-3">
-          <div className="flex items-center gap-1.5 rounded-full border border-white/15 bg-slate-950/85 p-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <div className="flex items-center gap-1.5 rounded-full border border-white/15 bg-slate-950/85 p-1">
+              <button
+                type="button"
+                onMouseDown={keepCanvasFocus}
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  setShowHelp((v) => !v);
+                }}
+                title="Меню та керування"
+                className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
+                  showHelp ? 'bg-amber-500 text-slate-950' : 'text-slate-200 hover:bg-white/12'
+                }`}
+              >
+                <HelpCircle className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={keepCanvasFocus}
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  onToggleMute();
+                }}
+                title={hud.muted ? 'Увімкнути звук' : 'Вимкнути звук'}
+                className="flex h-9 w-9 items-center justify-center rounded-full text-slate-200 transition-colors hover:bg-white/12"
+              >
+                {hud.muted ? <VolumeX className="h-4 w-4 text-rose-400" /> : <Volume2 className="h-4 w-4" />}
+              </button>
+              <button
+                type="button"
+                onMouseDown={keepCanvasFocus}
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  onToggleCameraMode();
+                }}
+                title="Режим камери (L)"
+                className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
+                  hud.pointerLocked || hud.autoFollowCam
+                    ? 'bg-sky-500/25 text-sky-300'
+                    : 'text-slate-200 hover:bg-white/12'
+                }`}
+              >
+                <Crosshair className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={keepCanvasFocus}
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  onTeleportCabin();
+                }}
+                title="До хатинки (R)"
+                className="flex h-9 w-9 items-center justify-center rounded-full text-slate-200 transition-colors hover:bg-white/12"
+              >
+                <Home className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={keepCanvasFocus}
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  onTeleportRiver();
+                }}
+                title="До річки (поплавати)"
+                className="flex h-9 w-9 items-center justify-center rounded-full text-sky-300 transition-colors hover:bg-white/12"
+              >
+                <Waves className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={keepCanvasFocus}
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  void toggleFullscreen();
+                }}
+                title={isFullscreen ? 'Вийти з повного екрана' : 'На весь екран'}
+                className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
+                  isFullscreen ? 'bg-emerald-500/25 text-emerald-300' : 'text-slate-200 hover:bg-white/12'
+                }`}
+              >
+                {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+              </button>
+            </div>
+
+            {/* Live FPS Sensor */}
             <button
               type="button"
               onMouseDown={keepCanvasFocus}
               onClick={(e) => {
                 e.currentTarget.blur();
-                setShowHelp((v) => !v);
+                setFpsVisible((v) => !v);
               }}
-              title="Меню та керування"
-              className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
-                showHelp ? 'bg-amber-500 text-slate-950' : 'text-slate-200 hover:bg-white/12'
+              title="Датчик FPS (натисніть, щоб згорнути/розгорнути)"
+              className={`flex h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-mono-nums font-bold transition-colors ${
+                hud.fps >= 50
+                  ? 'border-emerald-400/45 bg-slate-950/88 text-emerald-300'
+                  : hud.fps >= 30
+                    ? 'border-amber-400/45 bg-slate-950/88 text-amber-300'
+                    : 'border-rose-400/50 bg-slate-950/88 text-rose-300'
               }`}
             >
-              <HelpCircle className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onMouseDown={keepCanvasFocus}
-              onClick={(e) => {
-                e.currentTarget.blur();
-                onToggleMute();
-              }}
-              title={hud.muted ? 'Увімкнути звук' : 'Вимкнути звук'}
-              className="flex h-9 w-9 items-center justify-center rounded-full text-slate-200 transition-colors hover:bg-white/12"
-            >
-              {hud.muted ? <VolumeX className="h-4 w-4 text-rose-400" /> : <Volume2 className="h-4 w-4" />}
-            </button>
-            <button
-              type="button"
-              onMouseDown={keepCanvasFocus}
-              onClick={(e) => {
-                e.currentTarget.blur();
-                onToggleCameraMode();
-              }}
-              title="Режим камери (L)"
-              className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
-                hud.pointerLocked || hud.autoFollowCam
-                  ? 'bg-sky-500/25 text-sky-300'
-                  : 'text-slate-200 hover:bg-white/12'
-              }`}
-            >
-              <Crosshair className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onMouseDown={keepCanvasFocus}
-              onClick={(e) => {
-                e.currentTarget.blur();
-                onTeleportCabin();
-              }}
-              title="До хатинки (R)"
-              className="flex h-9 w-9 items-center justify-center rounded-full text-slate-200 transition-colors hover:bg-white/12"
-            >
-              <Home className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onMouseDown={keepCanvasFocus}
-              onClick={(e) => {
-                e.currentTarget.blur();
-                onTeleportRiver();
-              }}
-              title="До річки (поплавати)"
-              className="flex h-9 w-9 items-center justify-center rounded-full text-sky-300 transition-colors hover:bg-white/12"
-            >
-              <Waves className="h-4 w-4" />
+              <Activity className="h-3.5 w-3.5" />
+              {fpsVisible ? (
+                <span>
+                  {hud.fps} FPS <span className="text-[10px] font-normal text-slate-400">· {hud.frameMs}ms</span>
+                </span>
+              ) : (
+                <span>FPS</span>
+              )}
             </button>
           </div>
 
@@ -223,10 +308,10 @@ export const GameHud: React.FC<GameHudProps> = ({
                 />
               </div>
 
-              {/* Quick Resource Strip & Inventory/Craft shortcuts */}
+              {/* Quick Resource & Ammo Strip */}
               <div className="mt-2.5 flex items-center justify-between border-t border-white/10 pt-2 text-[11px] text-slate-300">
                 <span className="font-mono-nums">Дер:{hud.resources.wood} Камін:{hud.resources.stone} Зал:{hud.resources.iron}</span>
-                <span className="font-mono-nums text-emerald-300">Зіл:{hud.consumables.potion}</span>
+                <span className="font-mono-nums font-semibold text-amber-300">Кулі:{hud.ammoBullets}</span>
               </div>
             </div>
           )}
@@ -245,9 +330,10 @@ export const GameHud: React.FC<GameHudProps> = ({
           </div>
         )}
 
-        {/* Top-Right Inventory/Craft + Graphics Toggles */}
+        {/* Top-Right Inventory/Craft + Graphics Toggles + Phone Install */}
         <div className="pointer-events-auto flex flex-col items-end gap-2">
           <div className="flex flex-wrap items-center justify-end gap-1.5">
+            <PWAInstallButton onModalOpenChange={onInstallModalChange} />
             <button
               type="button"
               onMouseDown={keepCanvasFocus}
@@ -393,15 +479,17 @@ export const GameHud: React.FC<GameHudProps> = ({
             <span className="font-mono-nums text-white">Shift</span>
             <span className="text-slate-400">Стрибок / вгору у воді</span>
             <span className="font-mono-nums text-white">Пробіл (Space)</span>
-            <span className="text-slate-400">Огляд камерою</span>
-            <span className="font-mono-nums text-white">Затиснути мишу або Q / C</span>
+            <span className="text-slate-400">Вільна камера мишкою</span>
+            <span className="font-mono-nums text-white">Рух миші / L (фіксація) / Q, C</span>
             <span className="text-slate-400">Атака / рубка ресурсів</span>
-            <span className="font-mono-nums text-white">Клік мишею або F</span>
+            <span className="font-mono-nums text-white">ЛКМ або F</span>
+            <span className="text-slate-400">Кинути вибухову кулю</span>
+            <span className="font-mono-nums text-white">G або ПКМ</span>
             <span className="text-slate-400">Вибір зброї</span>
             <span className="font-mono-nums text-white">1, 2, 3, 4</span>
             <span className="text-slate-400">Зілля / тонік / юшка</span>
             <span className="font-mono-nums text-white">5, 6, 7</span>
-            <span className="text-slate-400">Скриня / ресурс / верстак / Орест</span>
+            <span className="text-slate-400">Скриня / ліжко / ресурс / верстак</span>
             <span className="font-mono-nums text-white">E</span>
             <span className="text-slate-400">Інвентар / Крафт</span>
             <span className="font-mono-nums text-white">I / K</span>
@@ -482,6 +570,20 @@ export const GameHud: React.FC<GameHudProps> = ({
                 >
                   <Sparkles className="h-4 w-4 text-amber-400" />
                   <span>Відкрити скриню (E)</span>
+                </button>
+              )}
+              {hud.nearBed && (
+                <button
+                  type="button"
+                  onMouseDown={keepCanvasFocus}
+                  onClick={(e) => {
+                    e.currentTarget.blur();
+                    onInteract();
+                  }}
+                  className="flex items-center gap-2 rounded-xl border border-rose-400/50 bg-slate-950/90 px-4 py-2 text-xs font-semibold text-rose-200 hover:bg-slate-800"
+                >
+                  <BedDouble className="h-4 w-4 text-rose-400" />
+                  <span>Відпочити на ліжку (+HP, +Кулі) (E)</span>
                 </button>
               )}
               {hud.nearWorkbench && (
@@ -595,6 +697,22 @@ export const GameHud: React.FC<GameHudProps> = ({
               <div className="flex items-center gap-2">
                 <button
                   type="button"
+                  disabled={hud.ammoBullets <= 0}
+                  onMouseDown={keepCanvasFocus}
+                  onClick={(e) => {
+                    e.currentTarget.blur();
+                    onThrowBullet();
+                  }}
+                  className={`flex h-14 px-3 items-center justify-center rounded-xl border text-xs font-bold ${
+                    hud.ammoBullets > 0
+                      ? 'border-amber-400/50 bg-amber-500/85 text-slate-950 active:bg-amber-400'
+                      : 'border-white/10 bg-slate-900/70 text-slate-500'
+                  }`}
+                >
+                  Куля ({hud.ammoBullets})
+                </button>
+                <button
+                  type="button"
                   onMouseDown={keepCanvasFocus}
                   onClick={(e) => {
                     e.currentTarget.blur();
@@ -690,6 +808,26 @@ export const GameHud: React.FC<GameHudProps> = ({
                 >
                   <FlaskConical className="h-3.5 w-3.5" />
                   <span className="font-mono-nums">Зілля ({hud.consumables.potion})</span>
+                </button>
+
+                {/* Throw Explosive Bullet (G / Right-Click) */}
+                <button
+                  type="button"
+                  disabled={hud.ammoBullets <= 0}
+                  onMouseDown={keepCanvasFocus}
+                  onClick={(e) => {
+                    e.currentTarget.blur();
+                    onThrowBullet();
+                  }}
+                  title="Кинути вибухову кулю в усіх (G або права кнопка миші)"
+                  className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold whitespace-nowrap shrink-0 transition-colors ${
+                    hud.ammoBullets > 0
+                      ? 'border-amber-400/60 bg-amber-500/20 text-amber-200 hover:bg-amber-500/30'
+                      : 'cursor-not-allowed border-white/10 bg-slate-900/50 text-slate-500'
+                  }`}
+                >
+                  <Flame className="h-3.5 w-3.5 text-amber-400" />
+                  <span className="font-mono-nums">Куля (G) · {hud.ammoBullets}</span>
                 </button>
 
                 {/* Attack Button */}

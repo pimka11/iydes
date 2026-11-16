@@ -31,9 +31,12 @@ export interface ProceduralTextures {
   cabinLog: THREE.CanvasTexture;
   treeBark: THREE.CanvasTexture;
   leafCluster: THREE.CanvasTexture;
+  blossomLeafCluster: THREE.CanvasTexture;
+  autumnLeafCluster: THREE.CanvasTexture;
   pineNeedle: THREE.CanvasTexture;
   fernCluster: THREE.CanvasTexture;
   flowerCluster: THREE.CanvasTexture;
+  flowerTextures: THREE.CanvasTexture[];
   reedCluster: THREE.CanvasTexture;
   roofShingle: THREE.CanvasTexture;
   stoneBlock: THREE.CanvasTexture;
@@ -188,71 +191,83 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
   }
   const treeBark = finalizeColorTexture(bCan, maxAnisotropy, 2, 3);
 
-  // 4b. Realistic Deciduous Foliage Spray Texture (512x512 RGBA)
-  const [lfCan, lfCtx] = makeCanvas(512, 512);
-  lfCtx.clearRect(0, 0, 512, 512);
-  lfCtx.strokeStyle = '#3f2e1e';
-  lfCtx.lineCap = 'round';
-  const drawTwig = (x1: number, y1: number, x2: number, y2: number, lw: number) => {
-    lfCtx.lineWidth = lw;
-    lfCtx.beginPath();
-    lfCtx.moveTo(x1, y1);
-    lfCtx.quadraticCurveTo((x1 + x2) * 0.5 + 14, (y1 + y2) * 0.5 - 10, x2, y2);
-    lfCtx.stroke();
-  };
-  drawTwig(256, 460, 256, 110, 7);
-  drawTwig(256, 360, 125, 195, 5);
-  drawTwig(256, 340, 388, 185, 5);
-  drawTwig(256, 240, 155, 115, 4);
-  drawTwig(256, 230, 355, 105, 4);
+  const makeFoliageTexture = (pal: [string, string, string, string, string, string, string]) => {
+    const [lfCan, lfCtx] = makeCanvas(512, 512);
+    lfCtx.clearRect(0, 0, 512, 512);
+    lfCtx.strokeStyle = '#3f2e1e';
+    lfCtx.lineCap = 'round';
+    const drawTwig = (x1: number, y1: number, x2: number, y2: number, lw: number) => {
+      lfCtx.lineWidth = lw;
+      lfCtx.beginPath();
+      lfCtx.moveTo(x1, y1);
+      lfCtx.quadraticCurveTo((x1 + x2) * 0.5 + 14, (y1 + y2) * 0.5 - 10, x2, y2);
+      lfCtx.stroke();
+    };
+    drawTwig(256, 460, 256, 110, 7);
+    drawTwig(256, 360, 125, 195, 5);
+    drawTwig(256, 340, 388, 185, 5);
+    drawTwig(256, 240, 155, 115, 4);
+    drawTwig(256, 230, 355, 105, 4);
 
-  const drawLeaf = (cx: number, cy: number, ang: number, len: number, wid: number, tone: number) => {
-    lfCtx.save();
-    lfCtx.translate(cx, cy);
-    lfCtx.rotate(ang);
-    const grad = lfCtx.createLinearGradient(0, 0, 0, -len);
-    if (tone < 0.34) {
-      grad.addColorStop(0, '#2a4f1b');
-      grad.addColorStop(1, '#4b7d28');
-    } else if (tone < 0.72) {
-      grad.addColorStop(0, '#3a6621');
-      grad.addColorStop(1, '#70a533');
-    } else {
-      grad.addColorStop(0, '#508229');
-      grad.addColorStop(1, '#98c744');
+    const drawLeaf = (cx: number, cy: number, ang: number, len: number, wid: number, tone: number) => {
+      lfCtx.save();
+      lfCtx.translate(cx, cy);
+      lfCtx.rotate(ang);
+      const grad = lfCtx.createLinearGradient(0, 0, 0, -len);
+      if (tone < 0.34) {
+        grad.addColorStop(0, pal[0]);
+        grad.addColorStop(1, pal[1]);
+      } else if (tone < 0.72) {
+        grad.addColorStop(0, pal[2]);
+        grad.addColorStop(1, pal[3]);
+      } else {
+        grad.addColorStop(0, pal[4]);
+        grad.addColorStop(1, pal[5]);
+      }
+      lfCtx.fillStyle = grad;
+      lfCtx.beginPath();
+      lfCtx.moveTo(0, 4);
+      lfCtx.bezierCurveTo(-wid, -len * 0.28, -wid * 0.88, -len * 0.78, 0, -len);
+      lfCtx.bezierCurveTo(wid * 0.88, -len * 0.78, wid, -len * 0.28, 0, 4);
+      lfCtx.closePath();
+      lfCtx.fill();
+
+      lfCtx.strokeStyle = pal[6];
+      lfCtx.lineWidth = 1.6;
+      lfCtx.beginPath();
+      lfCtx.moveTo(0, 0);
+      lfCtx.lineTo(0, -len * 0.86);
+      lfCtx.stroke();
+      lfCtx.restore();
+    };
+
+    for (let i = 0; i < 54; i++) {
+      const t = i / 54;
+      const radius = 36 + Math.pow((i * 0.6180339) % 1, 0.7) * 168;
+      const theta = i * 2.39996;
+      const lx = 256 + Math.cos(theta) * radius;
+      const ly = 260 + Math.sin(theta) * radius * 0.92;
+      const ang = theta + Math.PI * 0.5 + Math.sin(i * 3.1) * 0.45;
+      const len = 46 + (i % 5) * 9;
+      const wid = 17 + (i % 4) * 3.5;
+      drawLeaf(lx, ly, ang, len, wid, (t + (i % 3) * 0.25) % 1);
     }
-    lfCtx.fillStyle = grad;
-    lfCtx.beginPath();
-    lfCtx.moveTo(0, 4);
-    lfCtx.bezierCurveTo(-wid, -len * 0.28, -wid * 0.88, -len * 0.78, 0, -len);
-    lfCtx.bezierCurveTo(wid * 0.88, -len * 0.78, wid, -len * 0.28, 0, 4);
-    lfCtx.closePath();
-    lfCtx.fill();
-
-    lfCtx.strokeStyle = 'rgba(176, 214, 92, 0.42)';
-    lfCtx.lineWidth = 1.6;
-    lfCtx.beginPath();
-    lfCtx.moveTo(0, 0);
-    lfCtx.lineTo(0, -len * 0.86);
-    lfCtx.stroke();
-    lfCtx.restore();
+    const tex = new THREE.CanvasTexture(lfCan);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = maxAnisotropy;
+    tex.needsUpdate = true;
+    return tex;
   };
 
-  for (let i = 0; i < 54; i++) {
-    const t = i / 54;
-    const radius = 36 + Math.pow((i * 0.6180339) % 1, 0.7) * 168;
-    const theta = i * 2.39996;
-    const lx = 256 + Math.cos(theta) * radius;
-    const ly = 260 + Math.sin(theta) * radius * 0.92;
-    const ang = theta + Math.PI * 0.5 + Math.sin(i * 3.1) * 0.45;
-    const len = 46 + (i % 5) * 9;
-    const wid = 17 + (i % 4) * 3.5;
-    drawLeaf(lx, ly, ang, len, wid, (t + (i % 3) * 0.25) % 1);
-  }
-  const leafCluster = new THREE.CanvasTexture(lfCan);
-  leafCluster.colorSpace = THREE.SRGBColorSpace;
-  leafCluster.anisotropy = maxAnisotropy;
-  leafCluster.needsUpdate = true;
+  const leafCluster = makeFoliageTexture([
+    '#2a4f1b', '#4b7d28', '#3a6621', '#70a533', '#508229', '#98c744', 'rgba(176, 214, 92, 0.42)',
+  ]);
+  const blossomLeafCluster = makeFoliageTexture([
+    '#be185d', '#f472b6', '#db2777', '#fbcfe8', '#e11d48', '#fff1f2', 'rgba(255, 240, 245, 0.55)',
+  ]);
+  const autumnLeafCluster = makeFoliageTexture([
+    '#b45309', '#f59e0b', '#c2410c', '#fb923c', '#dc2626', '#fde047', 'rgba(254, 240, 138, 0.48)',
+  ]);
 
   // 4c. Conifer Pine Needle Bough Texture (512x512 RGBA)
   const [pnCan, pnCtx] = makeCanvas(512, 512);
@@ -321,45 +336,52 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
   fernCluster.anisotropy = maxAnisotropy;
   fernCluster.needsUpdate = true;
 
-  // 4e. Wildflower Clump Texture (256x256 RGBA: stems + daisies, buttercups, violet blooms)
-  const [flCan, flCtx] = makeCanvas(256, 256);
-  flCtx.clearRect(0, 0, 256, 256);
-  const flowerColors = ['#fef9c3', '#facc15', '#f8fafc', '#c084fc'];
-  for (let s = 0; s < 11; s++) {
-    const bx = 42 + s * 17;
-    const topX = bx + Math.sin(s * 1.9) * 18;
-    const topY = 42 + (s % 4) * 26;
-    flCtx.strokeStyle = '#3f6e24';
-    flCtx.lineWidth = 3;
-    flCtx.beginPath();
-    flCtx.moveTo(bx, 252);
-    flCtx.quadraticCurveTo((bx + topX) * 0.5, 160, topX, topY);
-    flCtx.stroke();
-
-    // Small basal leaves
-    flCtx.fillStyle = '#4e832c';
-    flCtx.beginPath();
-    flCtx.ellipse(bx - 7, 210 - (s % 3) * 14, 5, 16, -0.45, 0, Math.PI * 2);
-    flCtx.fill();
-
-    // Blossoms
-    const petalCol = flowerColors[s % flowerColors.length];
-    flCtx.fillStyle = petalCol;
-    for (let p = 0; p < 5; p++) {
-      const pa = (p / 5) * Math.PI * 2;
+  // 4e. Wildflower Clumps in 4 Vivid Color Palettes
+  const makeFlowerTexture = (petalColors: string[], centerColor: string) => {
+    const [flCan, flCtx] = makeCanvas(256, 256);
+    flCtx.clearRect(0, 0, 256, 256);
+    for (let s = 0; s < 12; s++) {
+      const bx = 36 + s * 17;
+      const topX = bx + Math.sin(s * 1.9) * 18;
+      const topY = 34 + (s % 4) * 26;
+      flCtx.strokeStyle = s % 2 === 0 ? '#3f6e24' : '#4f852a';
+      flCtx.lineWidth = 3.2;
       flCtx.beginPath();
-      flCtx.arc(topX + Math.cos(pa) * 9, topY + Math.sin(pa) * 9, 6, 0, Math.PI * 2);
+      flCtx.moveTo(bx, 252);
+      flCtx.quadraticCurveTo((bx + topX) * 0.5, 160, topX, topY);
+      flCtx.stroke();
+
+      flCtx.fillStyle = '#4e832c';
+      flCtx.beginPath();
+      flCtx.ellipse(bx - 7, 210 - (s % 3) * 14, 5.5, 17, -0.45, 0, Math.PI * 2);
+      flCtx.fill();
+
+      flCtx.fillStyle = petalColors[s % petalColors.length];
+      for (let p = 0; p < 5; p++) {
+        const pa = (p / 5) * Math.PI * 2;
+        flCtx.beginPath();
+        flCtx.arc(topX + Math.cos(pa) * 10, topY + Math.sin(pa) * 10, 6.8, 0, Math.PI * 2);
+        flCtx.fill();
+      }
+      flCtx.fillStyle = centerColor;
+      flCtx.beginPath();
+      flCtx.arc(topX, topY, 5.2, 0, Math.PI * 2);
       flCtx.fill();
     }
-    flCtx.fillStyle = '#f59e0b';
-    flCtx.beginPath();
-    flCtx.arc(topX, topY, 5, 0, Math.PI * 2);
-    flCtx.fill();
-  }
-  const flowerCluster = new THREE.CanvasTexture(flCan);
-  flowerCluster.colorSpace = THREE.SRGBColorSpace;
-  flowerCluster.anisotropy = maxAnisotropy;
-  flowerCluster.needsUpdate = true;
+    const tex = new THREE.CanvasTexture(flCan);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = maxAnisotropy;
+    tex.needsUpdate = true;
+    return tex;
+  };
+
+  const flowerTextures = [
+    makeFlowerTexture(['#fef08a', '#facc15', '#fb923c', '#ffffff'], '#b45309'), // Sun gold & daisy
+    makeFlowerTexture(['#f472b6', '#fb7185', '#f43f5e', '#fecdd3'], '#fde047'), // Wild rose & crimson
+    makeFlowerTexture(['#60a5fa', '#38bdf8', '#93c5fd', '#e0f2fe'], '#facc15'), // Cornflower & sky blue
+    makeFlowerTexture(['#c084fc', '#a855f7', '#e9d5ff', '#f8fafc'], '#f59e0b'), // Lavender & violet
+  ];
+  const flowerCluster = flowerTextures[0];
 
   // 4f. Riverbank Reeds & Cattails Texture (256x256 RGBA)
   const [rdCan, rdCtx] = makeCanvas(256, 256);
@@ -637,9 +659,12 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
     cabinLog,
     treeBark,
     leafCluster,
+    blossomLeafCluster,
+    autumnLeafCluster,
     pineNeedle,
     fernCluster,
     flowerCluster,
+    flowerTextures,
     reedCluster,
     roofShingle,
     stoneBlock,
@@ -658,9 +683,11 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
       cabinLog.dispose();
       treeBark.dispose();
       leafCluster.dispose();
+      blossomLeafCluster.dispose();
+      autumnLeafCluster.dispose();
       pineNeedle.dispose();
       fernCluster.dispose();
-      flowerCluster.dispose();
+      flowerTextures.forEach((t) => t.dispose());
       reedCluster.dispose();
       roofShingle.dispose();
       stoneBlock.dispose();
