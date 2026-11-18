@@ -5,10 +5,19 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { GameHud } from './components/GameHud';
-import { InventoryCraftModal } from './components/InventoryCraftModal';
+import { InventoryCraftModal, ModalTab } from './components/InventoryCraftModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { soundEngine } from './game/audio';
-import { ConsumableId, GameHudState, MobKind, WeaponId } from './game/types';
+import {
+  ConsumableId,
+  GameHudState,
+  MerchantKind,
+  MobKind,
+  QUESTS,
+  RelicId,
+  SEASON_DURATION_SEC,
+  WeaponId,
+} from './game/types';
 import { BlocklandWorld } from './game/world';
 
 const INITIAL_HUD: GameHudState = {
@@ -20,20 +29,37 @@ const INITIAL_HUD: GameHudState = {
   xp: 0,
   xpToNext: 100,
   level: 1,
-  coins: 0,
+  coins: 25,
   kills: 0,
   wave: 1,
   activeMobs: 0,
   peacefulMobs: 0,
-  ammoBullets: 6,
   activeWeapon: 'sword',
   weaponCooldownRatio: 0,
+  blocking: false,
+  parryActive: false,
+  relicCooldowns: {
+    amulet_vitality: 0,
+    cloak_wind: 0,
+    rune_power: 0,
+  },
+  relicBuffTimers: {
+    wind: 0,
+    berserk: 0,
+  },
+  season: 'summer',
+  seasonRemainingSec: SEASON_DURATION_SEC,
+  weather: 'clear',
   zoneName: 'Сонячна Галявина',
   insideCabin: false,
+  insideCave: false,
   nearCampfire: false,
   nearChest: false,
   nearBed: false,
   nearWorkbench: false,
+  nearShop: false,
+  activeMerchantKind: 'general',
+  nearNpcLabel: null,
   nearResourceLabel: null,
   nearVillager: false,
   inWater: false,
@@ -45,6 +71,16 @@ const INITIAL_HUD: GameHudState = {
   muted: false,
   fps: 60,
   frameMs: 16,
+  playerX: -2,
+  playerZ: 9,
+  playerYaw: Math.PI * 0.92,
+  villageX: -165,
+  villageZ: 240,
+  trampledCount: 0,
+  trailCells: [],
+  lastSavedAt: null,
+  minimapEntities: [],
+  quests: QUESTS.map((q) => ({ id: q.id, progress: 0, completed: false })),
   resources: {
     wood: 2,
     stone: 1,
@@ -67,7 +103,8 @@ export default function App() {
   const worldRef = useRef<BlocklandWorld | null>(null);
   const [hud, setHud] = useState<GameHudState>(INITIAL_HUD);
   const [contextLost, setContextLost] = useState(false);
-  const [inventoryTab, setInventoryTab] = useState<'inventory' | 'craft' | null>(null);
+  const [inventoryTab, setInventoryTab] = useState<ModalTab | null>(null);
+  const [activeMerchant, setActiveMerchant] = useState<MerchantKind>('general');
   const [helpOpen, setHelpOpen] = useState(false);
   const [installModalOpen, setInstallModalOpen] = useState(false);
 
@@ -88,6 +125,12 @@ export default function App() {
         soundEngine.playInventoryToggle(true);
         setInventoryTab('craft');
       },
+      (merchant: MerchantKind) => {
+        soundEngine.unlock();
+        soundEngine.playInventoryToggle(true);
+        setActiveMerchant(merchant);
+        setInventoryTab('shop');
+      },
     );
     worldRef.current = world;
 
@@ -103,6 +146,20 @@ export default function App() {
         soundEngine.unlock();
         setInventoryTab((prev) => {
           const next = prev === 'craft' ? null : 'craft';
+          soundEngine.playInventoryToggle(next !== null);
+          return next;
+        });
+      } else if (e.code === 'KeyM') {
+        soundEngine.unlock();
+        setInventoryTab((prev) => {
+          const next = prev === 'shop' ? null : 'shop';
+          soundEngine.playInventoryToggle(next !== null);
+          return next;
+        });
+      } else if (e.code === 'KeyJ') {
+        soundEngine.unlock();
+        setInventoryTab((prev) => {
+          const next = prev === 'quests' ? null : 'quests';
           soundEngine.playInventoryToggle(next !== null);
           return next;
         });
@@ -122,17 +179,20 @@ export default function App() {
     };
   }, []);
 
-  const toggleOrOpenTab = (tab: 'inventory' | 'craft') => {
+  const toggleOrOpenTab = (tab: ModalTab, merchant?: MerchantKind) => {
     soundEngine.unlock();
+    if (merchant) {
+      setActiveMerchant(merchant);
+    }
     setInventoryTab((prev) => {
-      const next = prev === tab ? null : tab;
+      const next = prev === tab && !merchant ? null : tab;
       soundEngine.playInventoryToggle(next !== null);
       return next;
     });
   };
 
   return (
-    <main className="relative h-screen w-screen overflow-hidden bg-slate-950">
+    <main className="relative h-dvh w-screen overflow-hidden bg-slate-950">
       <div ref={mountRef} className="absolute inset-0 h-full w-full" />
 
       {contextLost && (
@@ -160,6 +220,10 @@ export default function App() {
         onHelpOpenChange={setHelpOpen}
         onInstallModalChange={setInstallModalOpen}
         onUseConsumable={(id: ConsumableId) => worldRef.current?.useConsumable(id)}
+        onActivateRelic={(id: RelicId) => worldRef.current?.activateRelic(id)}
+        onSetBlocking={(active: boolean) => worldRef.current?.setBlocking(active)}
+        onCycleSeason={() => worldRef.current?.cycleSeason()}
+        onCycleWeather={() => worldRef.current?.cycleWeather()}
         onStart={() => worldRef.current?.startGame()}
         onRespawn={() => worldRef.current?.respawnPlayer()}
         onSelectWeapon={(id: WeaponId) => worldRef.current?.setWeapon(id)}
@@ -173,19 +237,24 @@ export default function App() {
         onTeleportRiver={() => worldRef.current?.teleportToRiver()}
         onInteract={() => worldRef.current?.interactNearby()}
         onAttack={() => worldRef.current?.triggerAttack()}
-        onThrowBullet={() => worldRef.current?.throwBullet()}
         onJump={() => worldRef.current?.jump()}
-        onTouchMove={(x, z) => worldRef.current?.setTouchMove(x, z)}
+        onTouchMove={(x, z, sprint) => worldRef.current?.setTouchMove(x, z, sprint)}
+        onSaveGame={() => worldRef.current?.saveGameNow(false)}
+        onNewGame={() => worldRef.current?.resetNewGame()}
       />
 
       <InventoryCraftModal
         open={inventoryTab !== null}
         tab={inventoryTab ?? 'inventory'}
         onTabChange={(t) => setInventoryTab(t)}
+        activeMerchant={activeMerchant}
+        onMerchantChange={setActiveMerchant}
         onClose={() => setInventoryTab(null)}
         hud={hud}
         onCraft={(recipeId) => worldRef.current?.craftRecipe(recipeId)}
+        onBuyShopItem={(itemId) => worldRef.current?.buyShopItem(itemId)}
         onUseConsumable={(id) => worldRef.current?.useConsumable(id)}
+        onActivateRelic={(id) => worldRef.current?.activateRelic(id)}
       />
 
       <OfflineIndicator />
