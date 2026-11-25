@@ -1,12 +1,13 @@
 import React, { useEffect, useRef } from 'react';
-import { BRIDGE_Z, riverCenterX } from '../game/terrain';
-import { MinimapEntity, SeasonId, TrailCellPoint } from '../game/types';
+import { BRIDGE_Z, riverCenterX } from '../terrain';
+import { MinimapEntity, SeasonId, TrailCellPoint } from '../types';
 
 interface MinimapProps {
   playerX: number;
   playerZ: number;
   playerYaw: number;
   season: SeasonId;
+  biomeId?: string;
   zoneName: string;
   entities: MinimapEntity[];
   trailCells?: TrailCellPoint[];
@@ -15,11 +16,12 @@ interface MinimapProps {
 
 const RADAR_RADIUS_METERS = 115;
 
-export const Minimap: React.FC<MinimapProps> = ({
+const MinimapInner: React.FC<MinimapProps> = ({
   playerX,
   playerZ,
   playerYaw,
   season,
+  biomeId,
   zoneName,
   entities,
   trailCells,
@@ -56,24 +58,35 @@ export const Minimap: React.FC<MinimapProps> = ({
     ctx.arc(cx, cy, size * 0.48, 0, Math.PI * 2);
     ctx.clip();
 
-    // Base biome background tinted subtly by season
-    ctx.fillStyle =
+    // Base biome background tinted subtly by biome and season
+    let bgHex =
       season === 'winter'
         ? '#1e293b'
         : season === 'autumn'
           ? '#262118'
           : '#11221b';
+    if (biomeId === 'ashlands') bgHex = '#231d29';
+    else if (biomeId === 'snow_peaks') bgHex = '#1d2d3e';
+    else if (biomeId === 'golden_steppe') bgHex = '#2c2516';
+    else if (biomeId === 'blossom_grove') bgHex = '#241c29';
+    else if (biomeId === 'desert') bgHex = '#3b2e14';
+    else if (biomeId === 'mystic_swamp') bgHex = '#122923';
+    else if (biomeId === 'autumn_woods') bgHex = '#2f1c12';
+    else if (biomeId === 'bamboo_grove') bgHex = '#15301c';
+    else if (biomeId === 'crystal_canyon') bgHex = '#19233d';
+    else if (biomeId === 'ancient_highlands') bgHex = '#26232e';
+    ctx.fillStyle = bgHex;
     ctx.fillRect(0, 0, size, size);
 
     // Subtle distance rings
-    ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.arc(cx, cy, size * 0.24, 0, Math.PI * 2);
     ctx.stroke();
 
     // Winding River
-    ctx.strokeStyle = season === 'winter' ? '#38bdf8' : '#1d6fd6';
+    ctx.strokeStyle = season === 'winter' || biomeId === 'snow_peaks' ? '#38bdf8' : '#1d6fd6';
     ctx.lineWidth = Math.max(4, 11 * scale);
     ctx.lineCap = 'round';
     ctx.beginPath();
@@ -115,7 +128,8 @@ export const Minimap: React.FC<MinimapProps> = ({
         e.kind === 'cave' ||
         e.kind === 'quest' ||
         e.kind === 'boss' ||
-        e.kind === 'village';
+        e.kind === 'village' ||
+        e.kind === 'player_remote';
       const drawX =
         distFromCenter > size * 0.43 && isPinnedMarker
           ? cx + ((sx - cx) / distFromCenter) * clampedDist
@@ -125,7 +139,15 @@ export const Minimap: React.FC<MinimapProps> = ({
           ? cy + ((sy - cy) / distFromCenter) * clampedDist
           : sy;
 
-      if (e.kind === 'village') {
+      if (e.kind === 'player_remote') {
+        ctx.fillStyle = '#06b6d4';
+        ctx.beginPath();
+        ctx.arc(drawX, drawY, 3.8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.4;
+        ctx.stroke();
+      } else if (e.kind === 'village') {
         ctx.fillStyle = '#10b981';
         ctx.fillRect(drawX - 4.5, drawY - 4.5, 9, 9);
         ctx.strokeStyle = '#fef08a';
@@ -196,7 +218,7 @@ export const Minimap: React.FC<MinimapProps> = ({
     ctx.stroke();
 
     ctx.restore();
-  }, [playerX, playerZ, playerYaw, season, entities, trailCells]);
+  }, [playerX, playerZ, playerYaw, season, biomeId, entities, trailCells]);
 
   return (
     <button
@@ -204,17 +226,31 @@ export const Minimap: React.FC<MinimapProps> = ({
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClickMap}
       title="Мінікарта долини (натисніть для квестів)"
-      className="group flex flex-col items-center gap-0.5 rounded-xl border border-white/15 bg-slate-950/88 p-1 shadow-xl"
+      className="group flex flex-col items-center gap-0.5 sm:gap-1 rounded-xl sm:rounded-2xl border border-slate-200/80 dark:border-white/15 bg-white/85 dark:bg-slate-950/88 p-0.5 sm:p-1.5 shadow-lg backdrop-blur-md"
     >
-      <div className="relative h-20 w-20 sm:h-28 sm:w-28">
+      <div className="relative h-11 w-11 sm:h-28 sm:w-28">
         <canvas ref={canvasRef} className="h-full w-full rounded-full" />
-        <span className="pointer-events-none absolute top-0.5 left-1/2 -translate-x-1/2 text-[8px] font-bold text-slate-300">
+        <span className="pointer-events-none absolute top-0.5 left-1/2 -translate-x-1/2 text-[6px] sm:text-[8px] font-bold text-slate-200">
           Пн
         </span>
       </div>
-      <span className="max-w-20 sm:max-w-28 truncate text-[9px] font-medium text-slate-300 group-hover:text-white">
+      <span className="max-w-12 sm:max-w-28 truncate text-[7px] sm:text-[9px] leading-tight font-semibold text-slate-700 dark:text-slate-300 group-hover:text-slate-950 dark:group-hover:text-white">
         {zoneName}
       </span>
     </button>
   );
 };
+
+export const Minimap = React.memo(
+  MinimapInner,
+  (prev, next) =>
+    Math.abs(prev.playerX - next.playerX) < 0.15 &&
+    Math.abs(prev.playerZ - next.playerZ) < 0.15 &&
+    Math.abs(prev.playerYaw - next.playerYaw) < 0.02 &&
+    prev.season === next.season &&
+    prev.biomeId === next.biomeId &&
+    prev.zoneName === next.zoneName &&
+    prev.entities === next.entities &&
+    (prev.trailCells?.length ?? 0) === (next.trailCells?.length ?? 0),
+);
+

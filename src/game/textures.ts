@@ -85,6 +85,18 @@ export interface ProceduralTextures {
   bakerFace: THREE.CanvasTexture;
   alchemistFace: THREE.CanvasTexture;
   guardFace: THREE.CanvasTexture;
+  mushroomCap: THREE.CanvasTexture;
+  boarHide: THREE.CanvasTexture;
+  spiderChitin: THREE.CanvasTexture;
+  entBark: THREE.CanvasTexture;
+  banditCloth: THREE.CanvasTexture;
+  scorpionCarapace: THREE.CanvasTexture;
+  mummyWrap: THREE.CanvasTexture;
+  yetiFur: THREE.CanvasTexture;
+  crystalSurface: THREE.CanvasTexture;
+  iceSpirit: THREE.CanvasTexture;
+  magmaCrust: THREE.CanvasTexture;
+  cursedArmor: THREE.CanvasTexture;
   dispose: () => void;
 }
 
@@ -417,38 +429,111 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
     '#b45309', '#f59e0b', '#c2410c', '#fb923c', '#dc2626', '#fde047', 'rgba(254, 240, 138, 0.48)',
   ]);
 
-  // 4c. Conifer Pine Needle Bough Texture (512x512 RGBA)
+  // 4c. Hyper-Realistic Alpha-Masked Norway Spruce Bough Texture (512x512 RGBA)
   const [pnCan, pnCtx] = makeCanvas(512, 512);
   pnCtx.clearRect(0, 0, 512, 512);
-  pnCtx.strokeStyle = '#3b2819';
-  pnCtx.lineWidth = 8;
-  pnCtx.beginPath();
-  pnCtx.moveTo(256, 480);
-  pnCtx.lineTo(256, 42);
-  pnCtx.stroke();
-  for (let i = 0; i < 150; i++) {
-    const t = i / 150;
-    const y = 450 - t * 395;
-    const spread = (1 - t * 0.75) * 160 + 22;
-    const side = i % 2 === 0 ? -1 : 1;
-    pnCtx.strokeStyle = i % 3 === 0 ? '#1b3e1f' : i % 3 === 1 ? '#295628' : '#3a6d30';
-    pnCtx.lineWidth = 4;
+
+  // Helper to paint a feathery conifer shoot full of angled 3D needles
+  const drawSpruceShoot = (
+    sx: number,
+    sy: number,
+    ex: number,
+    ey: number,
+    widthScale: number,
+    needleDensity: number,
+  ) => {
+    const dx = ex - sx;
+    const dy = ey - sy;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    const px = -uy;
+    const py = ux;
+
+    // Shaded woody twig
+    pnCtx.strokeStyle = '#3d2515';
+    pnCtx.lineWidth = 5.5 * widthScale;
+    pnCtx.lineCap = 'round';
     pnCtx.beginPath();
-    pnCtx.moveTo(256, y);
-    pnCtx.lineTo(256 + side * spread * (0.65 + (i % 4) * 0.1), y - 28 - (i % 3) * 14);
+    pnCtx.moveTo(sx, sy);
+    pnCtx.lineTo(ex, ey);
     pnCtx.stroke();
-    // Fine needles along sub-branch
-    for (let n = 0; n < 7; n++) {
-      const nt = 0.2 + (n / 7) * 0.8;
-      const nx = 256 + side * spread * nt * 0.8;
-      const ny = y - 24 * nt;
-      pnCtx.lineWidth = 2.5;
-      pnCtx.beginPath();
-      pnCtx.moveTo(nx, ny);
-      pnCtx.lineTo(nx + side * 16, ny - 22);
-      pnCtx.stroke();
+
+    const colorsDark = ['#102815', '#17381d', '#1e4a26'];
+    const colorsMid = ['#265c2e', '#2f7037', '#3a8440'];
+    const colorsTip = ['#4b974c', '#5ead58', '#75bf65'];
+
+    for (let i = 0; i < needleDensity; i++) {
+      const t = i / needleDensity;
+      const bx = sx + dx * t;
+      const by = sy + dy * t;
+      const taper = Math.sin(Math.min(1, t * 0.92 + 0.08) * Math.PI) * 0.85 + (1 - t) * 0.35;
+      const nLen = (26 + ((i * 17) % 14)) * widthScale * taper;
+      for (const side of [-1, 1]) {
+        const fanAngle = Math.atan2(uy, ux) + side * (0.48 + ((i * 7) % 10) * 0.045);
+        const nx = bx + Math.cos(fanAngle) * nLen;
+        const ny = by + Math.sin(fanAngle) * nLen;
+        // Shadow under-needle
+        pnCtx.strokeStyle = colorsDark[i % colorsDark.length];
+        pnCtx.lineWidth = (3.4 + (i % 2) * 0.9) * Math.max(0.65, widthScale * 0.8);
+        pnCtx.beginPath();
+        pnCtx.moveTo(bx + px * side * 1.5, by + py * side * 1.5);
+        pnCtx.lineTo(nx, ny);
+        pnCtx.stroke();
+        // Midtone spruce needle
+        pnCtx.strokeStyle = i % 3 === 0 ? colorsTip[i % colorsTip.length] : colorsMid[i % colorsMid.length];
+        pnCtx.lineWidth = 2.4 * Math.max(0.65, widthScale * 0.78);
+        pnCtx.beginPath();
+        pnCtx.moveTo(bx, by);
+        pnCtx.lineTo(nx * 0.96 + bx * 0.04, ny * 0.96 + by * 0.04 - 1.2);
+        pnCtx.stroke();
+      }
     }
+  };
+
+  // Main central spine (from bottom-center base upward so boughs anchor naturally at trunk/limb)
+  drawSpruceShoot(256, 492, 256, 46, 1.35, 115);
+
+  // Paired lateral spruce branchlets sweeping upward & outward in natural tiers
+  const sideShoots: [number, number, number, number, number, number][] = [
+    [256, 438, 92, 342, 1.05, 68],
+    [256, 438, 420, 342, 1.05, 68],
+    [256, 376, 76, 266, 1.0, 66],
+    [256, 376, 436, 266, 1.0, 66],
+    [256, 312, 98, 200, 0.94, 58],
+    [256, 312, 414, 200, 0.94, 58],
+    [256, 248, 124, 146, 0.86, 48],
+    [256, 248, 388, 146, 0.86, 48],
+    [256, 186, 152, 98, 0.78, 40],
+    [256, 186, 360, 98, 0.78, 40],
+    [256, 128, 188, 62, 0.68, 32],
+    [256, 128, 324, 62, 0.68, 32],
+    // Sub-twigs adding feathery fullness
+    [164, 388, 120, 424, 0.68, 28],
+    [348, 388, 392, 424, 0.68, 28],
+    [152, 314, 100, 336, 0.68, 28],
+    [360, 314, 412, 336, 0.68, 28],
+    [168, 250, 116, 248, 0.64, 24],
+    [344, 250, 396, 248, 0.64, 24],
+  ];
+  for (const [sx, sy, ex, ey, ws, dens] of sideShoots) {
+    drawSpruceShoot(sx, sy, ex, ey, ws, dens);
   }
+  // Dense sunlit crown tufts near center spine
+  for (let i = 0; i < 160; i++) {
+    const t = i / 160;
+    const cx = 256 + Math.sin(i * 4.7) * (120 * (1 - t * 0.65));
+    const cy = 448 - t * 384 + Math.cos(i * 3.1) * 14;
+    const ang = -Math.PI * 0.5 + Math.sin(i * 2.3) * 0.9;
+    const nLen = 14 + (i % 5) * 3;
+    pnCtx.strokeStyle = i % 3 === 0 ? '#509e4d' : i % 2 === 0 ? '#2b6633' : '#183f20';
+    pnCtx.lineWidth = 2.6;
+    pnCtx.beginPath();
+    pnCtx.moveTo(cx, cy);
+    pnCtx.lineTo(cx + Math.cos(ang) * nLen, cy + Math.sin(ang) * nLen);
+    pnCtx.stroke();
+  }
+
   const pineNeedle = new THREE.CanvasTexture(pnCan);
   pineNeedle.colorSpace = THREE.SRGBColorSpace;
   pineNeedle.anisotropy = maxAnisotropy;
@@ -717,100 +802,74 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
   }
   const caveRock = finalizeColorTexture(crCan, maxAnisotropy, 3, 2);
 
-  // 7. Detailed charcoal hoodie weave with ribbing, chest crest & zipper (256x256)
+  // 7. Blocky Charcoal Hoodie fabric texture (256x256)
   const [hCan, hCtx] = makeCanvas(256, 256);
-  const hGrad = hCtx.createLinearGradient(0, 0, 0, 256);
-  hGrad.addColorStop(0, '#363c48');
-  hGrad.addColorStop(0.5, '#2b303a');
-  hGrad.addColorStop(1, '#1e222b');
-  hCtx.fillStyle = hGrad;
+  hCtx.fillStyle = '#2b313d';
   hCtx.fillRect(0, 0, 256, 256);
-  for (let y = 0; y < 256; y += 2) {
-    hCtx.fillStyle = y % 4 === 0 ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.12)';
-    hCtx.fillRect(0, y, 256, 1);
+  for (let y = 0; y < 256; y += 8) {
+    hCtx.fillStyle = y % 16 === 0 ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.06)';
+    hCtx.fillRect(0, y, 256, 4);
   }
-  for (let x = 0; x < 256; x += 5) {
-    hCtx.fillStyle = 'rgba(0,0,0,0.06)';
-    hCtx.fillRect(x, 0, 2, 256);
-  }
-  // Zipper & chest ranger patch
-  hCtx.fillStyle = '#14171d';
+  hCtx.fillStyle = '#181c24';
   hCtx.fillRect(122, 0, 12, 256);
   hCtx.fillStyle = '#cbd5e1';
-  for (let y = 6; y < 250; y += 7) {
-    hCtx.fillRect(126, y, 4, 3);
+  for (let y = 8; y < 248; y += 12) {
+    hCtx.fillRect(126, y, 4, 6);
   }
   hCtx.fillStyle = '#0ea5e9';
-  hCtx.beginPath();
-  hCtx.arc(72, 74, 18, 0, Math.PI * 2);
-  hCtx.fill();
+  hCtx.fillRect(58, 60, 32, 32);
   hCtx.strokeStyle = '#fbbf24';
-  hCtx.lineWidth = 3;
-  hCtx.stroke();
+  hCtx.lineWidth = 4;
+  hCtx.strokeRect(58, 60, 32, 32);
   const hoodieFabric = finalizeColorTexture(hCan, maxAnisotropy, 1, 1);
 
-  // 8. Detailed blue denim jeans with twill texture & stitching (256x256)
+  // 8. Classic blocky blue denim jeans texture (256x256)
   const [dCan, dCtx] = makeCanvas(256, 256);
-  const dGrad = dCtx.createLinearGradient(0, 0, 0, 256);
-  dGrad.addColorStop(0, '#466a8c');
-  dGrad.addColorStop(0.5, '#5980a3');
-  dGrad.addColorStop(1, '#3b5875');
-  dCtx.fillStyle = dGrad;
+  dCtx.fillStyle = '#3f6285';
   dCtx.fillRect(0, 0, 256, 256);
-  for (let i = 0; i < 2400; i++) {
-    dCtx.fillStyle = Math.random() > 0.5 ? 'rgba(255,255,255,0.1)' : 'rgba(16,30,48,0.18)';
-    dCtx.fillRect(Math.random() * 256, Math.random() * 256, 7, 1.4);
+  for (let y = 0; y < 256; y += 4) {
+    for (let x = 0; x < 256; x += 4) {
+      if ((x + y) % 8 === 0) {
+        dCtx.fillStyle = 'rgba(255,255,255,0.06)';
+        dCtx.fillRect(x, y, 4, 4);
+      }
+    }
   }
-  dCtx.strokeStyle = '#f59e0b';
-  dCtx.lineWidth = 2.5;
-  dCtx.setLineDash([6, 4]);
-  dCtx.strokeRect(10, 10, 236, 236);
+  dCtx.strokeStyle = 'rgba(245, 158, 11, 0.72)';
+  dCtx.lineWidth = 4;
+  dCtx.strokeRect(8, 8, 240, 240);
   const denimFabric = finalizeColorTexture(dCan, maxAnisotropy, 1, 1);
 
-  // 9. Expressive Roblox-inspired face with irises, shading & warm cheeks
+  // 9. Classic Blocky Roblox-style happy adventurer face (256x256)
   const [fCan, fCtx] = makeCanvas(256, 256);
-  const fGrad = fCtx.createRadialGradient(128, 118, 25, 128, 128, 160);
-  fGrad.addColorStop(0, '#f7cca6');
-  fGrad.addColorStop(1, '#e8b384');
-  fCtx.fillStyle = fGrad;
+  fCtx.fillStyle = '#f2c197';
   fCtx.fillRect(0, 0, 256, 256);
-  fCtx.fillStyle = 'rgba(239, 116, 98, 0.25)';
-  fCtx.beginPath();
-  fCtx.ellipse(60, 136, 20, 11, 0, 0, Math.PI * 2);
-  fCtx.ellipse(196, 136, 20, 11, 0, 0, Math.PI * 2);
-  fCtx.fill();
-  for (const ex of [86, 170]) {
-    fCtx.fillStyle = '#ffffff';
+  fCtx.fillStyle = 'rgba(244, 114, 182, 0.25)';
+  fCtx.fillRect(42, 134, 28, 14);
+  fCtx.fillRect(186, 134, 28, 14);
+  for (const ex of [84, 172]) {
+    fCtx.fillStyle = '#111827';
     fCtx.beginPath();
-    fCtx.ellipse(ex, 108, 17, 21, 0, 0, Math.PI * 2);
-    fCtx.fill();
-    fCtx.fillStyle = '#0f172a';
-    fCtx.beginPath();
-    fCtx.ellipse(ex, 109, 12, 16, 0, 0, Math.PI * 2);
-    fCtx.fill();
-    fCtx.fillStyle = '#0284c7';
-    fCtx.beginPath();
-    fCtx.arc(ex, 113, 7, 0, Math.PI * 2);
+    fCtx.ellipse(ex, 108, 13, 18, 0, 0, Math.PI * 2);
     fCtx.fill();
     fCtx.fillStyle = '#ffffff';
     fCtx.beginPath();
     fCtx.arc(ex - 4, 100, 5, 0, Math.PI * 2);
-    fCtx.arc(ex + 4, 116, 2.5, 0, Math.PI * 2);
     fCtx.fill();
   }
   fCtx.strokeStyle = '#6f3219';
   fCtx.lineWidth = 7;
+  fCtx.beginPath();
+  fCtx.moveTo(64, 78);
+  fCtx.lineTo(106, 76);
+  fCtx.moveTo(150, 76);
+  fCtx.lineTo(192, 78);
+  fCtx.stroke();
+  fCtx.strokeStyle = '#111827';
+  fCtx.lineWidth = 8;
   fCtx.lineCap = 'round';
   fCtx.beginPath();
-  fCtx.moveTo(60, 78);
-  fCtx.quadraticCurveTo(86, 68, 108, 80);
-  fCtx.moveTo(148, 80);
-  fCtx.quadraticCurveTo(170, 68, 196, 78);
-  fCtx.stroke();
-  fCtx.strokeStyle = '#1f1612';
-  fCtx.lineWidth = 6.5;
-  fCtx.beginPath();
-  fCtx.arc(128, 144, 34, 0.18 * Math.PI, 0.82 * Math.PI);
+  fCtx.arc(128, 142, 34, 0.15 * Math.PI, 0.85 * Math.PI);
   fCtx.stroke();
   const robloxFace = finalizeColorTexture(fCan, maxAnisotropy, 1, 1);
 
@@ -842,16 +901,18 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
   }
   const goblinSkin = finalizeColorTexture(gsCan, maxAnisotropy, 1, 1);
 
-  // 9d. Golem cracked granite + glowing orange rune seams (256x256)
+  // 9d. Golem blocky granite + glowing orange rune seams (256x256)
   const [goCan, goCtx] = makeCanvas(256, 256);
-  goCtx.fillStyle = '#64748b';
+  goCtx.fillStyle = '#5c6674';
   goCtx.fillRect(0, 0, 256, 256);
-  for (let i = 0; i < 700; i++) {
-    goCtx.fillStyle = Math.random() > 0.5 ? 'rgba(255,255,255,0.1)' : 'rgba(15,23,42,0.22)';
-    goCtx.fillRect(Math.random() * 256, Math.random() * 256, 8, 8);
+  for (let y = 0; y < 256; y += 32) {
+    for (let x = 0; x < 256; x += 32) {
+      goCtx.fillStyle = (x + y) % 64 === 0 ? '#697485' : '#4e5866';
+      goCtx.fillRect(x, y, 30, 30);
+    }
   }
   goCtx.strokeStyle = '#f59e0b';
-  goCtx.lineWidth = 4;
+  goCtx.lineWidth = 5;
   goCtx.beginPath();
   goCtx.moveTo(28, 36);
   goCtx.lineTo(128, 88);
@@ -916,39 +977,29 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
   }
   const sheepWool = finalizeColorTexture(swCan, maxAnisotropy, 1, 1);
 
-  // 10. Goblin detailed scarred fierce face
+  // 10. Goblin blocky scarred fierce face
   const [gfCan, gfCtx] = makeCanvas(256, 256);
   gfCtx.fillStyle = '#5c8f3d';
   gfCtx.fillRect(0, 0, 256, 256);
-  for (let i = 0; i < 160; i++) {
-    gfCtx.fillStyle = i % 2 === 0 ? 'rgba(35, 64, 20, 0.25)' : 'rgba(134, 182, 82, 0.2)';
-    gfCtx.fillRect(Math.random() * 256, Math.random() * 256, 8, 8);
+  for (const ex of [78, 178]) {
+    gfCtx.fillStyle = '#fde047';
+    gfCtx.fillRect(ex - 20, 90, 40, 24);
+    gfCtx.fillStyle = '#991b1b';
+    gfCtx.fillRect(ex - 6, 92, 12, 20);
   }
-  gfCtx.fillStyle = '#fde047';
-  gfCtx.fillRect(54, 88, 46, 26);
-  gfCtx.fillRect(156, 88, 46, 26);
-  gfCtx.fillStyle = '#991b1b';
-  gfCtx.fillRect(72, 93, 14, 16);
-  gfCtx.fillRect(170, 93, 14, 16);
   gfCtx.strokeStyle = '#254218';
-  gfCtx.lineWidth = 10;
+  gfCtx.lineWidth = 9;
   gfCtx.beginPath();
-  gfCtx.moveTo(44, 68);
+  gfCtx.moveTo(46, 72);
   gfCtx.lineTo(108, 92);
-  gfCtx.moveTo(212, 68);
+  gfCtx.moveTo(210, 72);
   gfCtx.lineTo(148, 92);
   gfCtx.stroke();
   gfCtx.fillStyle = '#1e293b';
-  gfCtx.fillRect(72, 164, 112, 32);
+  gfCtx.fillRect(74, 164, 108, 28);
   gfCtx.fillStyle = '#f8fafc';
-  gfCtx.beginPath();
-  gfCtx.moveTo(82, 196);
-  gfCtx.lineTo(96, 165);
-  gfCtx.lineTo(110, 196);
-  gfCtx.moveTo(146, 196);
-  gfCtx.lineTo(160, 165);
-  gfCtx.lineTo(174, 196);
-  gfCtx.fill();
+  gfCtx.fillRect(86, 166, 16, 22);
+  gfCtx.fillRect(154, 166, 16, 22);
   const goblinFace = finalizeColorTexture(gfCan, maxAnisotropy, 1, 1);
 
   // 10b. Friendly Villager Ranger face with warm beard
@@ -1148,7 +1199,7 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
   const waterRippleNormal = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
   waterRippleNormal.wrapS = THREE.RepeatWrapping;
   waterRippleNormal.wrapT = THREE.RepeatWrapping;
-  waterRippleNormal.repeat.set(4, 14);
+  waterRippleNormal.repeat.set(6, 96);
   waterRippleNormal.needsUpdate = true;
 
   // 12b. Seamless Organic Water Foam & River Streaking Texture (256x256)
@@ -1445,33 +1496,271 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
   alCtx.stroke();
   const alchemistFace = finalizeColorTexture(alCan, maxAnisotropy, 1, 1);
 
-  // Guard Вартовий Северин (determined eyes + cheek scar)
+  // Guard Вартовий Северин (blocky eyes + cheek scar)
   const [gdCan, gdCtx] = makeCanvas(256, 256);
-  gdCtx.fillStyle = '#eab88d';
+  gdCtx.fillStyle = '#ecc094';
   gdCtx.fillRect(0, 0, 256, 256);
   gdCtx.strokeStyle = '#991b1b';
-  gdCtx.lineWidth = 5;
+  gdCtx.lineWidth = 6;
   gdCtx.beginPath();
   gdCtx.moveTo(56, 118);
   gdCtx.lineTo(86, 154);
   gdCtx.stroke();
   for (const ex of [88, 168]) {
+    gdCtx.fillStyle = '#ffffff';
+    gdCtx.fillRect(ex - 14, 94, 28, 20);
     gdCtx.fillStyle = '#0f172a';
-    gdCtx.fillRect(ex - 13, 96, 26, 16);
-    gdCtx.fillStyle = '#f8fafc';
-    gdCtx.fillRect(ex - 9, 98, 7, 7);
+    gdCtx.fillRect(ex - 7, 96, 14, 16);
   }
   gdCtx.strokeStyle = '#1c1917';
-  gdCtx.lineWidth = 9;
+  gdCtx.lineWidth = 8;
   gdCtx.beginPath();
-  gdCtx.moveTo(58, 74);
-  gdCtx.lineTo(112, 88);
-  gdCtx.moveTo(198, 74);
-  gdCtx.lineTo(144, 88);
+  gdCtx.moveTo(58, 76);
+  gdCtx.lineTo(112, 89);
+  gdCtx.moveTo(198, 76);
+  gdCtx.lineTo(144, 89);
   gdCtx.stroke();
-  gdCtx.fillStyle = '#334155';
-  gdCtx.fillRect(92, 162, 72, 10);
+  gdCtx.strokeStyle = '#334155';
+  gdCtx.lineWidth = 6;
+  gdCtx.beginPath();
+  gdCtx.moveTo(96, 164);
+  gdCtx.lineTo(160, 162);
+  gdCtx.stroke();
   const guardFace = finalizeColorTexture(gdCan, maxAnisotropy, 1, 1);
+
+  // 18. Detailed Procedural Textures for All 25 Mobs (v11)
+  // 18a. Mushroom Imp Cap (crimson velvet with ivory warts & radial gradients)
+  const [mcCan, mcCtx] = makeCanvas(256, 256);
+  const mcGrad = mcCtx.createRadialGradient(128, 128, 12, 128, 128, 150);
+  mcGrad.addColorStop(0, '#ef4444');
+  mcGrad.addColorStop(0.6, '#b91c1c');
+  mcGrad.addColorStop(1, '#7f1d1d');
+  mcCtx.fillStyle = mcGrad;
+  mcCtx.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 24; i++) {
+    const x = ((i * 73) % 220) + 18;
+    const y = ((i * 109) % 220) + 18;
+    const r = 8 + (i % 5) * 3.5;
+    mcCtx.fillStyle = 'rgba(254, 249, 195, 0.9)';
+    mcCtx.beginPath();
+    mcCtx.arc(x, y, r, 0, Math.PI * 2);
+    mcCtx.fill();
+    mcCtx.strokeStyle = 'rgba(180, 83, 9, 0.35)';
+    mcCtx.lineWidth = 2;
+    mcCtx.stroke();
+  }
+  const mushroomCap = finalizeColorTexture(mcCan, maxAnisotropy, 1, 1);
+
+  // 18b. Dire Boar Coarse Fur Hide
+  const [bhCan, bhCtx] = makeCanvas(256, 256);
+  bhCtx.fillStyle = '#3f2314';
+  bhCtx.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 1600; i++) {
+    const x = (i * 53) % 256;
+    const y = (i * 97) % 256;
+    bhCtx.strokeStyle = i % 3 === 0 ? '#6b3e26' : i % 2 === 0 ? '#2b160b' : '#854d27';
+    bhCtx.lineWidth = 2.2;
+    bhCtx.beginPath();
+    bhCtx.moveTo(x, y);
+    bhCtx.lineTo(x + 4, y + 11);
+    bhCtx.stroke();
+  }
+  const boarHide = finalizeColorTexture(bhCan, maxAnisotropy, 1, 1);
+
+  // 18c. Giant Spider Glossy Chitin
+  const [spCan, spCtx] = makeCanvas(256, 256);
+  spCtx.fillStyle = '#181024';
+  spCtx.fillRect(0, 0, 256, 256);
+  for (let row = 0; row < 12; row++) {
+    spCtx.strokeStyle = row % 2 === 0 ? '#4c1d95' : '#2e1065';
+    spCtx.lineWidth = 5;
+    spCtx.beginPath();
+    spCtx.arc(128, row * 24, 110, 0.15, Math.PI - 0.15);
+    spCtx.stroke();
+  }
+  for (let i = 0; i < 200; i++) {
+    spCtx.fillStyle = i % 5 === 0 ? 'rgba(192, 132, 252, 0.35)' : 'rgba(255, 255, 255, 0.08)';
+    spCtx.fillRect((i * 41) % 256, (i * 67) % 256, 3, 5);
+  }
+  const spiderChitin = finalizeColorTexture(spCan, maxAnisotropy, 1, 1);
+
+  // 18d. Ancient Forest Ent Bark with Moss Veins
+  const [ebCan, ebCtx] = makeCanvas(256, 256);
+  ebCtx.fillStyle = '#3b2513';
+  ebCtx.fillRect(0, 0, 256, 256);
+  for (let x = 0; x < 256; x += 12) {
+    ebCtx.fillStyle = (x / 12) % 2 === 0 ? '#29180c' : '#52341c';
+    ebCtx.fillRect(x, 0, 7, 256);
+  }
+  for (let i = 0; i < 40; i++) {
+    ebCtx.strokeStyle = i % 4 === 0 ? 'rgba(74, 222, 128, 0.65)' : 'rgba(34, 197, 94, 0.45)';
+    ebCtx.lineWidth = 3;
+    const gx = (i * 37) % 256;
+    ebCtx.beginPath();
+    ebCtx.moveTo(gx, 0);
+    ebCtx.bezierCurveTo(gx + 14, 80, gx - 14, 170, gx + 4, 256);
+    ebCtx.stroke();
+  }
+  const entBark = finalizeColorTexture(ebCan, maxAnisotropy, 1, 2);
+
+  // 18e. Bandit Raider Stitched Leather & Crimson Cloth
+  const [bcCan, bcCtx] = makeCanvas(256, 256);
+  bcCtx.fillStyle = '#451a1a';
+  bcCtx.fillRect(0, 0, 256, 256);
+  bcCtx.strokeStyle = '#78350f';
+  bcCtx.lineWidth = 6;
+  for (let y = 16; y < 256; y += 32) {
+    bcCtx.beginPath();
+    bcCtx.moveTo(0, y);
+    bcCtx.lineTo(256, y);
+    bcCtx.stroke();
+  }
+  bcCtx.strokeStyle = '#fbbf24';
+  bcCtx.setLineDash([6, 6]);
+  bcCtx.lineWidth = 2;
+  for (let x = 32; x < 256; x += 64) {
+    bcCtx.beginPath();
+    bcCtx.moveTo(x, 0);
+    bcCtx.lineTo(x, 256);
+    bcCtx.stroke();
+  }
+  bcCtx.setLineDash([]);
+  const banditCloth = finalizeColorTexture(bcCan, maxAnisotropy, 1, 1);
+
+  // 18f. Desert Scorpion Segmented Amber Carapace
+  const [scCan, scCtx] = makeCanvas(256, 256);
+  scCtx.fillStyle = '#78350f';
+  scCtx.fillRect(0, 0, 256, 256);
+  for (let row = 0; row < 8; row++) {
+    const y = row * 32;
+    const gr = scCtx.createLinearGradient(0, y, 0, y + 32);
+    gr.addColorStop(0, '#d97706');
+    gr.addColorStop(0.7, '#b45309');
+    gr.addColorStop(1, '#451a03');
+    scCtx.fillStyle = gr;
+    scCtx.fillRect(0, y + 2, 256, 28);
+  }
+  const scorpionCarapace = finalizeColorTexture(scCan, maxAnisotropy, 1, 1);
+
+  // 18g. Sand Mummy Weathered Linen Wraps
+  const [mwCan, mwCtx] = makeCanvas(256, 256);
+  mwCtx.fillStyle = '#a89060';
+  mwCtx.fillRect(0, 0, 256, 256);
+  for (let y = -16; y < 280; y += 22) {
+    mwCtx.save();
+    mwCtx.translate(128, y);
+    mwCtx.rotate(((y * 7) % 9 - 4) * 0.03);
+    mwCtx.fillStyle = (y / 22) % 2 === 0 ? '#e7d8b1' : '#d4be8d';
+    mwCtx.fillRect(-150, -9, 300, 17);
+    mwCtx.fillStyle = 'rgba(87, 65, 36, 0.35)';
+    mwCtx.fillRect(-150, 7, 300, 3);
+    mwCtx.restore();
+  }
+  const mummyWrap = finalizeColorTexture(mwCan, maxAnisotropy, 1, 2);
+
+  // 18h. Frost Yeti Thick Shaggy Fur
+  const [yfCan, yfCtx] = makeCanvas(256, 256);
+  yfCtx.fillStyle = '#cbd5e1';
+  yfCtx.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 1600; i++) {
+    const x = (i * 47) % 256;
+    const y = (i * 89) % 256;
+    yfCtx.strokeStyle = i % 3 === 0 ? '#ffffff' : i % 2 === 0 ? '#e0f2fe' : '#93c5fd';
+    yfCtx.lineWidth = 2.6;
+    yfCtx.beginPath();
+    yfCtx.moveTo(x, y);
+    yfCtx.lineTo(x + (i % 5) - 2, y + 12);
+    yfCtx.stroke();
+  }
+  const yetiFur = finalizeColorTexture(yfCan, maxAnisotropy, 1, 1);
+
+  // 18i. Crystal Golem Faceted Mineral Surface
+  const [cgCan, cgCtx] = makeCanvas(256, 256);
+  cgCtx.fillStyle = '#0e7490';
+  cgCtx.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 36; i++) {
+    const x = (i * 59) % 256;
+    const y = (i * 83) % 256;
+    cgCtx.fillStyle = i % 3 === 0 ? '#67e8f9' : i % 2 === 0 ? '#22d3ee' : '#a855f7';
+    cgCtx.beginPath();
+    cgCtx.moveTo(x, y - 26);
+    cgCtx.lineTo(x + 22, y + 10);
+    cgCtx.lineTo(x - 18, y + 20);
+    cgCtx.closePath();
+    cgCtx.fill();
+    cgCtx.strokeStyle = 'rgba(255,255,255,0.45)';
+    cgCtx.lineWidth = 1.5;
+    cgCtx.stroke();
+  }
+  const crystalSurface = finalizeColorTexture(cgCan, maxAnisotropy, 1, 1);
+
+  // 18j. Ice Wraith Swirling Frost Runes
+  const [isCan, isCtx] = makeCanvas(256, 256);
+  const isGrad = isCtx.createLinearGradient(0, 0, 0, 256);
+  isGrad.addColorStop(0, '#e0f2fe');
+  isGrad.addColorStop(0.5, '#38bdf8');
+  isGrad.addColorStop(1, '#1d4ed8');
+  isCtx.fillStyle = isGrad;
+  isCtx.fillRect(0, 0, 256, 256);
+  isCtx.strokeStyle = 'rgba(255,255,255,0.5)';
+  isCtx.lineWidth = 3;
+  for (let i = 0; i < 14; i++) {
+    isCtx.beginPath();
+    isCtx.arc(128, 30 + i * 16, 40 + (i % 4) * 20, 0, Math.PI * 1.4);
+    isCtx.stroke();
+  }
+  const iceSpirit = finalizeColorTexture(isCan, maxAnisotropy, 1, 1);
+
+  // 18k. Magma Crust Cracked Volcanic Basalt + Molten Glow
+  const [mgCan, mgCtx] = makeCanvas(256, 256);
+  mgCtx.fillStyle = '#1c100d';
+  mgCtx.fillRect(0, 0, 256, 256);
+  mgCtx.strokeStyle = '#f97316';
+  mgCtx.lineWidth = 5;
+  for (let i = 0; i < 16; i++) {
+    const sx = (i * 43) % 256;
+    const sy = (i * 71) % 256;
+    mgCtx.beginPath();
+    mgCtx.moveTo(sx, sy);
+    mgCtx.lineTo(sx + 48, sy + 26);
+    mgCtx.lineTo(sx + 18, sy + 72);
+    mgCtx.stroke();
+  }
+  mgCtx.strokeStyle = '#fde047';
+  mgCtx.lineWidth = 2;
+  for (let i = 0; i < 16; i++) {
+    const sx = (i * 43) % 256;
+    const sy = (i * 71) % 256;
+    mgCtx.beginPath();
+    mgCtx.moveTo(sx, sy);
+    mgCtx.lineTo(sx + 48, sy + 26);
+    mgCtx.stroke();
+  }
+  const magmaCrust = finalizeColorTexture(mgCan, maxAnisotropy, 1, 1);
+
+  // 18l. Cursed Knight Obsidian Runic Plate
+  const [ckCan, ckCtx] = makeCanvas(256, 256);
+  ckCtx.fillStyle = '#181826';
+  ckCtx.fillRect(0, 0, 256, 256);
+  ckCtx.strokeStyle = '#475569';
+  ckCtx.lineWidth = 4;
+  for (let y = 32; y < 256; y += 64) {
+    ckCtx.strokeRect(8, y - 24, 240, 48);
+  }
+  ckCtx.strokeStyle = '#c084fc';
+  ckCtx.lineWidth = 2.5;
+  for (let i = 0; i < 8; i++) {
+    const cx = 32 + (i % 4) * 64;
+    const cy = 64 + Math.floor(i / 4) * 128;
+    ckCtx.beginPath();
+    ckCtx.moveTo(cx, cy - 16);
+    ckCtx.lineTo(cx + 12, cy);
+    ckCtx.lineTo(cx, cy + 16);
+    ckCtx.lineTo(cx - 12, cy);
+    ckCtx.closePath();
+    ckCtx.stroke();
+  }
+  const cursedArmor = finalizeColorTexture(ckCan, maxAnisotropy, 1, 1);
 
   return {
     grassTile,
@@ -1534,6 +1823,18 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
     bakerFace,
     alchemistFace,
     guardFace,
+    mushroomCap,
+    boarHide,
+    spiderChitin,
+    entBark,
+    banditCloth,
+    scorpionCarapace,
+    mummyWrap,
+    yetiFur,
+    crystalSurface,
+    iceSpirit,
+    magmaCrust,
+    cursedArmor,
     dispose: () => {
       grassTile.dispose();
       grassNormal.dispose();
@@ -1594,6 +1895,18 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
       bakerFace.dispose();
       alchemistFace.dispose();
       guardFace.dispose();
+      mushroomCap.dispose();
+      boarHide.dispose();
+      spiderChitin.dispose();
+      entBark.dispose();
+      banditCloth.dispose();
+      scorpionCarapace.dispose();
+      mummyWrap.dispose();
+      yetiFur.dispose();
+      crystalSurface.dispose();
+      iceSpirit.dispose();
+      magmaCrust.dispose();
+      cursedArmor.dispose();
     },
   };
 }

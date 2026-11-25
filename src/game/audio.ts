@@ -261,9 +261,60 @@ class SoundEngine {
       this.playTone(125, 86, 0.12, 'triangle', 0.12);
     } else if (id === 'blaster') {
       this.playTone(460, 960, 0.11, 'sine', 0.075);
+    } else if (id === 'axe') {
+      this.playFilteredNoise(0.1, 'bandpass', 1200, 700, 1.4, 0.09);
+      this.playTone(260, 190, 0.1, 'triangle', 0.1);
+    } else if (id === 'pickaxe') {
+      this.playTone(720, 1080, 0.09, 'triangle', 0.085);
+      this.playFilteredNoise(0.08, 'highpass', 1500, 2400, 1.4, 0.055);
+    } else if (id === 'builder') {
+      this.playTone(392, 523, 0.09, 'triangle', 0.085);
     } else {
       this.playTone(310, 465, 0.1, 'triangle', 0.08);
     }
+  }
+
+  // Axe chopping timber impact
+  public playWoodChop() {
+    this.playTone(195, 76, 0.14, 'triangle', 0.22);
+    this.playTone(420, 180, 0.07, 'square', 0.05);
+    this.playFilteredNoise(0.11, 'bandpass', 1150, 320, 1.2, 0.16);
+  }
+
+  // Pickaxe striking stone or ore vein (metallic ring + stone crunch)
+  public playPickaxeHit() {
+    this.playTone(1180, 740, 0.12, 'triangle', 0.16);
+    this.playTone(1680, 1290, 0.15, 'sine', 0.09, 0.01);
+    this.playFilteredNoise(0.12, 'bandpass', 1450, 420, 1.3, 0.17);
+  }
+
+  // Heavy boulder shattering upon final pickaxe strike
+  public playRockBreak() {
+    this.playTone(150, 42, 0.28, 'triangle', 0.24);
+    this.playTone(890, 420, 0.14, 'sine', 0.1);
+    this.playFilteredNoise(0.32, 'lowpass', 920, 180, 0.85, 0.24);
+    this.playFilteredNoise(0.22, 'bandpass', 2200, 620, 1.1, 0.12, 0.05);
+  }
+
+  // Heavy tree trunk cracking and falling
+  public playTreeFall() {
+    this.playTone(240, 95, 0.24, 'sawtooth', 0.11);
+    this.playFilteredNoise(0.32, 'bandpass', 900, 220, 1.0, 0.18, 0.04);
+    this.playTone(108, 36, 0.36, 'sine', 0.24, 0.24);
+    this.playFilteredNoise(0.28, 'lowpass', 580, 140, 0.8, 0.18, 0.24);
+  }
+
+  // Placing modular building block
+  public playBuildPlace() {
+    this.playTone(210, 130, 0.11, 'triangle', 0.16);
+    this.playTone(420, 560, 0.09, 'sine', 0.09, 0.04);
+    this.playFilteredNoise(0.08, 'bandpass', 850, 420, 1.4, 0.09);
+  }
+
+  // Dismantling modular building block
+  public playBuildDemolish() {
+    this.playTone(310, 120, 0.14, 'triangle', 0.14);
+    this.playFilteredNoise(0.12, 'bandpass', 950, 280, 1.1, 0.12);
   }
 
   // Crafting forge anvil / potion brew
@@ -279,6 +330,33 @@ class SoundEngine {
     this.playTone(659, 659, 0.11, 'triangle', 0.13, 0.09);
     this.playTone(784, 784, 0.13, 'triangle', 0.14, 0.18);
     this.playTone(1046, 1175, 0.26, 'sine', 0.14, 0.28);
+  }
+
+  // Heavy tree trunk ground impact crash
+  public playTreeImpact() {
+    this.playTone(94, 30, 0.42, 'sine', 0.3);
+    this.playTone(145, 42, 0.28, 'triangle', 0.2);
+    this.playFilteredNoise(0.38, 'lowpass', 680, 110, 0.75, 0.26);
+    this.playFilteredNoise(0.32, 'bandpass', 1700, 420, 0.9, 0.12, 0.04);
+  }
+
+  // Campfire meat roasting sizzle + warm completion chime
+  public playCookSizzle() {
+    this.playFilteredNoise(0.42, 'bandpass', 3200, 1650, 0.85, 0.13);
+    this.playTone(520, 780, 0.12, 'sine', 0.08, 0.18);
+    this.playTone(780, 1040, 0.14, 'triangle', 0.08, 0.28);
+  }
+
+  // Deep boss roar / seismic slam
+  public playBossSlam() {
+    this.playTone(115, 28, 0.52, 'sawtooth', 0.22);
+    this.playTone(78, 24, 0.55, 'sine', 0.28);
+    this.playFilteredNoise(0.45, 'lowpass', 720, 120, 0.7, 0.24);
+  }
+
+  // Subtle tactile footstep on earth/grass
+  public playFootstep(sprinting: boolean) {
+    this.playFilteredNoise(0.055, 'lowpass', sprinting ? 520 : 380, 140, 0.9, sprinting ? 0.042 : 0.026);
   }
 
   // UI inventory/shop open/close

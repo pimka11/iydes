@@ -27,8 +27,8 @@ export const OfflineIndicator: React.FC = () => {
   if (isOnline) return null;
 
   return (
-    <div className="pointer-events-none fixed bottom-4 left-4 z-50 flex items-center gap-2 rounded-xl border border-amber-400/40 bg-slate-950/90 px-3 py-1.5 text-xs font-medium text-amber-200 shadow-lg">
-      <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+    <div className="pointer-events-none fixed bottom-4 left-4 z-50 flex items-center gap-2 rounded-xl border border-amber-500/40 bg-white/92 dark:bg-slate-950/90 px-3 py-1.5 text-xs font-medium text-amber-800 dark:text-amber-200 shadow-lg backdrop-blur-md">
+      <span className="h-2 w-2 rounded-full bg-amber-500" />
       Офлайн режим — гра працює з кешу
     </div>
   );
