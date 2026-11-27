@@ -2,6 +2,7 @@ import React from 'react';
 import {
   Eye,
   Gauge,
+  Globe,
   Monitor,
   Moon,
   RotateCcw,
@@ -14,10 +15,12 @@ import {
   DEFAULT_GRAPHICS_SETTINGS,
   GraphicsPreset,
   GraphicsSettings,
+  LanguageCode,
   ShadowQualitySetting,
   ThemeMode,
   ViewDistanceSetting,
 } from '../types';
+import { getPresetInfo, getUiStrings, LANGUAGE_OPTIONS } from '../i18n';
 
 interface GraphicsSettingsModalProps {
   open: boolean;
@@ -28,65 +31,46 @@ interface GraphicsSettingsModalProps {
   onClose: () => void;
 }
 
-const PRESET_CONFIGS: Record<
-  GraphicsPreset,
-  { label: string; desc: string; patch: Partial<GraphicsSettings> }
-> = {
+const PRESET_PATCHES: Record<GraphicsPreset, Partial<GraphicsSettings>> = {
   low: {
-    label: 'Низька',
-    desc: 'Максимум FPS без підвисань: без постобробки, 25% трави, 65% рендер',
-    patch: {
-      preset: 'low',
-      renderScale: 0.65,
-      shadowQuality: 'off',
-      grassDensity: 0.25,
-      viewDistance: 'near',
-      dofEnabled: false,
-      bloomEnabled: false,
-      ecoMode: true,
-    },
+    preset: 'low',
+    renderScale: 0.65,
+    shadowQuality: 'off',
+    grassDensity: 0.25,
+    viewDistance: 'near',
+    dofEnabled: false,
+    bloomEnabled: false,
+    ecoMode: false,
   },
   medium: {
-    label: 'Середня',
-    desc: 'Плавний баланс: 1K тіні, 50% трави, без важкого Bloom/DoF',
-    patch: {
-      preset: 'medium',
-      renderScale: 0.85,
-      shadowQuality: '1k',
-      grassDensity: 0.5,
-      viewDistance: 'medium',
-      dofEnabled: false,
-      bloomEnabled: false,
-      ecoMode: true,
-    },
+    preset: 'medium',
+    renderScale: 0.85,
+    shadowQuality: '1k',
+    grassDensity: 0.5,
+    viewDistance: 'medium',
+    dofEnabled: false,
+    bloomEnabled: false,
+    ecoMode: false,
   },
   high: {
-    label: 'Висока',
-    desc: 'Рекомендовано: 100% трави, 2K тіні, AoE-світіння',
-    patch: {
-      preset: 'high',
-      renderScale: 1,
-      shadowQuality: '2k',
-      grassDensity: 1,
-      viewDistance: 'far',
-      dofEnabled: false,
-      bloomEnabled: true,
-      ecoMode: true,
-    },
+    preset: 'high',
+    renderScale: 1,
+    shadowQuality: '1k',
+    grassDensity: 0.75,
+    viewDistance: 'far',
+    dofEnabled: false,
+    bloomEnabled: false,
+    ecoMode: false,
   },
   ultra: {
-    label: 'Ультра',
-    desc: 'Максимальна чіткість 4K тіней та 125% рендер',
-    patch: {
-      preset: 'ultra',
-      renderScale: 1.25,
-      shadowQuality: '4k',
-      grassDensity: 1,
-      viewDistance: 'far',
-      dofEnabled: true,
-      bloomEnabled: true,
-      ecoMode: false,
-    },
+    preset: 'ultra',
+    renderScale: 1.25,
+    shadowQuality: '2k',
+    grassDensity: 1,
+    viewDistance: 'far',
+    dofEnabled: true,
+    bloomEnabled: true,
+    ecoMode: false,
   },
 };
 
@@ -100,14 +84,18 @@ export const GraphicsSettingsModal: React.FC<GraphicsSettingsModalProps> = ({
 }) => {
   if (!open) return null;
 
+  const lang: LanguageCode = settings.language ?? 'uk';
+  const ui = getUiStrings(lang);
   const keepFocus = (e: React.MouseEvent<HTMLButtonElement>) => e.preventDefault();
 
   const applyPreset = (preset: GraphicsPreset) => {
     onChangeSettings({
       ...settings,
-      ...PRESET_CONFIGS[preset].patch,
+      ...PRESET_PATCHES[preset],
     });
   };
+
+  const activePresetInfo = getPresetInfo(lang, settings.preset);
 
   return (
     <div className="pointer-events-auto fixed inset-0 z-30 flex items-center justify-center bg-slate-900/45 dark:bg-slate-950/78 p-3 sm:p-4 backdrop-blur-xs">
@@ -120,10 +108,10 @@ export const GraphicsSettingsModal: React.FC<GraphicsSettingsModalProps> = ({
             </div>
             <div>
               <h2 className="font-display text-sm sm:text-base font-bold text-slate-900 dark:text-white">
-                Налаштування Графіки та Теми
+                {ui.gfxTitle}
               </h2>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Зміни зберігаються автоматично в SQL базі даних
+                {ui.gfxSubtitle}
               </p>
             </div>
           </div>
@@ -131,7 +119,7 @@ export const GraphicsSettingsModal: React.FC<GraphicsSettingsModalProps> = ({
             type="button"
             onMouseDown={keepFocus}
             onClick={onClose}
-            title="Закрити"
+            title={ui.closeLabel}
             className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800"
           >
             <X className="h-4 w-4" />
@@ -140,10 +128,39 @@ export const GraphicsSettingsModal: React.FC<GraphicsSettingsModalProps> = ({
 
         {/* Body */}
         <div className="overflow-y-auto p-4 sm:p-5 space-y-5">
+          {/* Language Switcher (5 Languages: UK, EN, ES, PL, RU) */}
+          <div>
+            <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              <Globe className="h-3.5 w-3.5 text-sky-500" />
+              <span>{ui.languageLabel}</span>
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+              {LANGUAGE_OPTIONS.map((opt) => {
+                const active = lang === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onMouseDown={keepFocus}
+                    onClick={() => onChangeSettings({ ...settings, language: opt.id })}
+                    className={`flex items-center justify-center gap-1.5 rounded-xl border px-2.5 py-2 text-xs font-bold transition-colors ${
+                      active
+                        ? 'border-sky-500 bg-sky-500 text-slate-950 shadow-sm'
+                        : 'border-slate-200 dark:border-white/12 bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <span className="font-mono-nums text-[10px] opacity-75">{opt.short}</span>
+                    <span>{opt.native}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Theme Switcher */}
           <div>
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Тема інтерфейсу
+              {ui.themeSection}
             </h3>
             <div className="grid grid-cols-2 gap-2.5">
               <button
@@ -157,7 +174,7 @@ export const GraphicsSettingsModal: React.FC<GraphicsSettingsModalProps> = ({
                 }`}
               >
                 <Sun className="h-4 w-4" />
-                <span>Світла тема</span>
+                <span>{ui.lightTheme}</span>
               </button>
               <button
                 type="button"
@@ -170,7 +187,7 @@ export const GraphicsSettingsModal: React.FC<GraphicsSettingsModalProps> = ({
                 }`}
               >
                 <Moon className="h-4 w-4" />
-                <span>Темна тема</span>
+                <span>{ui.darkTheme}</span>
               </button>
             </div>
           </div>
@@ -178,31 +195,32 @@ export const GraphicsSettingsModal: React.FC<GraphicsSettingsModalProps> = ({
           {/* Quality Presets */}
           <div>
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Загальний профіль якості
+              {ui.presetSection}
             </h3>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {(['low', 'medium', 'high', 'ultra'] as GraphicsPreset[]).map((key) => {
                 const active = settings.preset === key;
+                const info = getPresetInfo(lang, key);
                 return (
                   <button
                     key={key}
                     type="button"
                     onMouseDown={keepFocus}
                     onClick={() => applyPreset(key)}
-                    title={PRESET_CONFIGS[key].desc}
+                    title={info.desc}
                     className={`rounded-xl border px-3 py-2 text-center text-xs font-bold transition-colors ${
                       active
                         ? 'border-emerald-500 bg-emerald-500 text-slate-950'
                         : 'border-slate-200 dark:border-white/12 bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
                     }`}
                   >
-                    {PRESET_CONFIGS[key].label}
+                    {info.label}
                   </button>
                 );
               })}
             </div>
             <p className="mt-1.5 text-[11px] text-slate-500 dark:text-slate-400">
-              {PRESET_CONFIGS[settings.preset].desc}
+              {activePresetInfo.desc}
             </p>
           </div>
 
@@ -210,7 +228,7 @@ export const GraphicsSettingsModal: React.FC<GraphicsSettingsModalProps> = ({
           <div>
             <div className="mb-1.5 flex items-center justify-between text-xs">
               <span className="font-semibold text-slate-700 dark:text-slate-200">
-                Масштаб рендеру (Роздільна здатність)
+                {ui.renderScaleLabel}
               </span>
               <span className="font-mono-nums font-bold text-sky-600 dark:text-sky-300">
                 {Math.round(settings.renderScale * 100)}%
@@ -239,16 +257,16 @@ export const GraphicsSettingsModal: React.FC<GraphicsSettingsModalProps> = ({
           <div>
             <div className="mb-1.5 flex items-center justify-between text-xs">
               <span className="font-semibold text-slate-700 dark:text-slate-200">
-                Деталізація тіней
+                {ui.shadowQualityLabel}
               </span>
               <span className="font-mono-nums font-bold text-amber-600 dark:text-amber-300">
-                {settings.shadowQuality === 'off' ? 'Вимкнено' : settings.shadowQuality.toUpperCase()}
+                {settings.shadowQuality === 'off' ? ui.offLabel : settings.shadowQuality.toUpperCase()}
               </span>
             </div>
             <div className="grid grid-cols-4 gap-2">
               {(
                 [
-                  { id: 'off', label: 'Вимк.' },
+                  { id: 'off', label: ui.shadowOff },
                   { id: '1k', label: '1K' },
                   { id: '2k', label: '2K' },
                   { id: '4k', label: '4K' },
@@ -277,7 +295,7 @@ export const GraphicsSettingsModal: React.FC<GraphicsSettingsModalProps> = ({
               <div className="mb-1.5 flex items-center justify-between text-xs">
                 <span className="flex items-center gap-1 font-semibold text-slate-700 dark:text-slate-200">
                   <Trees className="h-3.5 w-3.5 text-emerald-500" />
-                  <span>Щільність трави</span>
+                  <span>{ui.grassDensityLabel}</span>
                 </span>
                 <span className="font-mono-nums font-bold text-emerald-600 dark:text-emerald-300">
                   {Math.round(settings.grassDensity * 100)}%
@@ -305,15 +323,15 @@ export const GraphicsSettingsModal: React.FC<GraphicsSettingsModalProps> = ({
             <div>
               <div className="mb-1.5 flex items-center justify-between text-xs">
                 <span className="font-semibold text-slate-700 dark:text-slate-200">
-                  Дальність виду
+                  {ui.viewDistanceLabel}
                 </span>
               </div>
               <div className="grid grid-cols-3 gap-1.5">
                 {(
                   [
-                    { id: 'near', label: 'Близька' },
-                    { id: 'medium', label: 'Середня' },
-                    { id: 'far', label: 'Далека' },
+                    { id: 'near', label: ui.viewNear },
+                    { id: 'medium', label: ui.viewMedium },
+                    { id: 'far', label: ui.viewFar },
                   ] as { id: ViewDistanceSetting; label: string }[]
                 ).map((v) => (
                   <button
@@ -350,9 +368,9 @@ export const GraphicsSettingsModal: React.FC<GraphicsSettingsModalProps> = ({
             >
               <span className="flex items-center gap-1.5">
                 <Eye className="h-3.5 w-3.5" />
-                <span>Глибина різкості</span>
+                <span>{ui.dofLabel}</span>
               </span>
-              <span>{settings.dofEnabled ? 'Увімк' : 'Вимк'}</span>
+              <span>{settings.dofEnabled ? ui.onLabel : ui.offLabel}</span>
             </button>
 
             <button
@@ -369,9 +387,9 @@ export const GraphicsSettingsModal: React.FC<GraphicsSettingsModalProps> = ({
             >
               <span className="flex items-center gap-1.5">
                 <Sparkles className="h-3.5 w-3.5" />
-                <span>Світіння (Bloom)</span>
+                <span>{ui.bloomLabel}</span>
               </span>
-              <span>{settings.bloomEnabled ? 'Увімк' : 'Вимк'}</span>
+              <span>{settings.bloomEnabled ? ui.onLabel : ui.offLabel}</span>
             </button>
 
             <button
@@ -388,9 +406,9 @@ export const GraphicsSettingsModal: React.FC<GraphicsSettingsModalProps> = ({
             >
               <span className="flex items-center gap-1.5">
                 <Gauge className="h-3.5 w-3.5" />
-                <span>Еко 60 FPS</span>
+                <span>{ui.ecoModeLabel}</span>
               </span>
-              <span>{settings.ecoMode ? 'Увімк' : 'Вимк'}</span>
+              <span>{settings.ecoMode ? ui.onLabel : ui.offLabel}</span>
             </button>
           </div>
         </div>
@@ -400,11 +418,11 @@ export const GraphicsSettingsModal: React.FC<GraphicsSettingsModalProps> = ({
           <button
             type="button"
             onMouseDown={keepFocus}
-            onClick={() => onChangeSettings({ ...DEFAULT_GRAPHICS_SETTINGS })}
+            onClick={() => onChangeSettings({ ...DEFAULT_GRAPHICS_SETTINGS, language: lang })}
             className="flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-white/12 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
           >
             <RotateCcw className="h-3.5 w-3.5" />
-            <span>Рекомендовані</span>
+            <span>{ui.recommendedBtn}</span>
           </button>
           <button
             type="button"
@@ -412,7 +430,7 @@ export const GraphicsSettingsModal: React.FC<GraphicsSettingsModalProps> = ({
             onClick={onClose}
             className="rounded-xl bg-emerald-500 px-5 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-400"
           >
-            Готово
+            {ui.doneBtn}
           </button>
         </div>
       </div>

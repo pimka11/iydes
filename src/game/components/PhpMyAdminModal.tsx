@@ -27,9 +27,12 @@ import {
   SqlQueryResult,
   SqlTableDataResponse,
 } from '../../db/sqlClient';
+import { getUiStrings } from '../i18n';
+import { LanguageCode } from '../types';
 
 interface PhpMyAdminModalProps {
   open: boolean;
+  language?: LanguageCode;
   onClose: () => void;
   onDatabaseMutated: () => void;
 }
@@ -48,9 +51,11 @@ const PRESET_QUERIES: { label: string; sql: string }[] = [
 
 export const PhpMyAdminModal: React.FC<PhpMyAdminModalProps> = ({
   open,
+  language,
   onClose,
   onDatabaseMutated,
 }) => {
+  const s = getUiStrings(language);
   const [overview, setOverview] = useState<SqlOverviewResponse | null>(null);
   const [selectedTable, setSelectedTable] = useState<string>('player_saves');
   const [activeTab, setActiveTab] = useState<AdminTab>('browse');
@@ -267,6 +272,14 @@ export const PhpMyAdminModal: React.FC<PhpMyAdminModalProps> = ({
                 {overview.engine} · {(overview.fileSizeBytes / 1024).toFixed(1)} KB
               </span>
             )}
+            <a
+              href="/dolina_blokiv_itch.zip"
+              download="dolina_blokiv_itch.zip"
+              className="flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/15 px-3 py-1.5 text-xs font-bold text-sky-800 dark:text-sky-200 hover:bg-sky-500/25 transition-colors"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span>Завантажити itch.io ZIP</span>
+            </a>
             <button
               type="button"
               onClick={() => {
@@ -283,7 +296,7 @@ export const PhpMyAdminModal: React.FC<PhpMyAdminModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              title="Закрити (Esc)"
+              title={`${s.closeLabel} (Esc)`}
               className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
             >
               <X className="h-4 w-4" />

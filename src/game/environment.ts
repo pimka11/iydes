@@ -13,6 +13,7 @@ import {
   mountainRockFactorAt,
   nearAnyCabin,
   nearAnyCave,
+  nearAnyDungeon,
   nearVillage,
   riverCenterX,
   riverHalfWidthAt,
@@ -1304,6 +1305,7 @@ export function buildWorldEnvironment(
         if (Math.abs(wx - riverCenterX(wz)) - riverHalfWidthAt(wz) < 0.75) continue;
         if (nearAnyCabin(wx, wz, 6.2)) continue;
         if (nearAnyCave(wx, wz, 11.8)) continue;
+        if (nearAnyDungeon(wx, wz, 8.8)) continue;
         if (villagePlazaFactorAt(wx, wz) > 0.12) continue;
         if (isInsidePlayerBuild(wx, wz)) continue;
         const adx = wx - FINAL_ARENA_X;
@@ -1717,12 +1719,26 @@ export function buildWorldEnvironment(
   const activeFloraChunks = new Map<string, FloraChunk>();
   const activeTrees = new Map<string, TreeInstanceRecord>();
   const choppedTreeIds = new Set<string>(options.initialChoppedTrees ?? []);
+  const choppedUntilMap = new Map<string, number>();
+  const dormantChoppedTrees = new Map<
+    string,
+    { rec: TreeInstanceRecord; stumpGroup: THREE.Group; regrowTimer: number }
+  >();
+  const growingTrees: { rec: TreeInstanceRecord; progress: number }[] = [];
   const treeShakes: { rec: TreeInstanceRecord; timer: number; dirX: number; dirZ: number }[] = [];
   let floraRadius = mobilePerf ? 1 : 2;
+  let envElapsedSec = 0;
   const gColor = new THREE.Color();
   const m4 = new THREE.Matrix4();
 
-  const placeStumpInGroup = (parent: THREE.Group, x: number, y: number, z: number, scale: number, rotY: number) => {
+  const placeStumpInGroup = (
+    parent: THREE.Group,
+    x: number,
+    y: number,
+    z: number,
+    scale: number,
+    rotY: number,
+  ): THREE.Group => {
     const sg = new THREE.Group();
     sg.position.set(x, y - 0.14, z);
     sg.rotation.y = rotY;
@@ -1734,6 +1750,7 @@ export function buildWorldEnvironment(
     capMesh.receiveShadow = true;
     sg.add(barkMesh, capMesh);
     parent.add(sg);
+    return sg;
   };
 
   const buildFloraChunk = (cx: number, cz: number): FloraChunk => {
@@ -1756,7 +1773,7 @@ export function buildWorldEnvironment(
 
     if (!outOfWorld) {
       // A. Meadow & Forest Grass Tufts (zero-GC typed array buffers, tuned per 96m chunk)
-      const grassTarget = Math.round((mobilePerf ? 1600 : 3400) * grassDensityScale);
+      const grassTarget = Math.round((mobilePerf ? 1500 : 2000) * grassDensityScale);
       const grassMatrices = new Float32Array(grassTarget * 16);
       const grassColors = new Float32Array(grassTarget * 3);
       let grassCount = 0;
@@ -1767,6 +1784,7 @@ export function buildWorldEnvironment(
         if (Math.abs(x - riverCenterX(z)) - riverHalfWidthAt(z) < 0.85) continue;
         if (nearAnyCabin(x, z, 6.4)) continue;
         if (nearAnyCave(x, z, 12.2)) continue;
+        if (nearAnyDungeon(x, z, 8.8)) continue;
         if (villagePlazaFactorAt(x, z) > 0.12) continue;
         if (isInsidePlayerBuild(x, z)) continue;
         const y = groundHeightAt(x, z);
@@ -1862,6 +1880,7 @@ export function buildWorldEnvironment(
         if (Math.abs(x - riverCenterX(z)) - riverHalfWidthAt(z) < 0.95) continue;
         if (nearAnyCabin(x, z, 6.4)) continue;
         if (nearAnyCave(x, z, 12.2)) continue;
+        if (nearAnyDungeon(x, z, 8.8)) continue;
         if (villagePlazaFactorAt(x, z) > 0.12) continue;
         if (isInsidePlayerBuild(x, z)) continue;
         const y = groundHeightAt(x, z);
@@ -1910,6 +1929,7 @@ export function buildWorldEnvironment(
         if (Math.abs(x - riverCenterX(z)) - riverHalfWidthAt(z) < 2.1) continue;
         if (nearAnyCabin(x, z, 7.8)) continue;
         if (nearAnyCave(x, z, 12.2)) continue;
+        if (nearAnyDungeon(x, z, 9.2)) continue;
         if (villagePlazaFactorAt(x, z) > 0.1) continue;
         if (isInsidePlayerBuild(x, z)) continue;
         const y = groundHeightAt(x, z);
@@ -2013,6 +2033,7 @@ export function buildWorldEnvironment(
         if (Math.hypot(x + 2, z - 9) < 12.0) continue;
         if (nearAnyCabin(x, z, 11.5)) continue;
         if (nearAnyCave(x, z, 15.5)) continue;
+        if (nearAnyDungeon(x, z, 11.5)) continue;
         if (nearVillage(x, z, 72)) continue;
         if (mountainRockFactorAt(x, z) > 0.52) continue;
         if (Math.hypot(x - 46, z + 24) < 14) continue;
@@ -2109,6 +2130,13 @@ export function buildWorldEnvironment(
           const sy = species === 'pine' ? tp.scale * (tp.hBias + 0.12) : tp.scale * tp.hBias;
           const sz = species === 'pine' ? tp.scale * 0.95 : tp.scale * (0.9 + rand() * 0.22);
 
+          if (choppedTreeIds.has(tp.id)) {
+            const until = choppedUntilMap.get(tp.id);
+            if (until !== undefined && envElapsedSec >= until) {
+              choppedTreeIds.delete(tp.id);
+              choppedUntilMap.delete(tp.id);
+            }
+          }
           const isChopped = choppedTreeIds.has(tp.id);
           dummy.position.set(tp.x, y - 0.25, tp.z);
           dummy.rotation.set(rotX, rotY, rotZ);
@@ -2123,37 +2151,45 @@ export function buildWorldEnvironment(
           gColor.setHSL(hueBase + (rand() - 0.5) * hueSpan, satBase + rand() * 0.16, 0.76 + rand() * 0.24);
           cInst.setColorAt(idx, gColor);
 
+          const colRadius = tp.id.startsWith('t_starter_') ? 0.72 * tp.scale : 0.68 * tp.scale;
+          const collider: ObstacleCollider = { x: tp.x, z: tp.z, radius: colRadius };
+          const maxHp = Math.max(95, Math.round(125 * tp.scale));
+          const rec: TreeInstanceRecord = {
+            id: tp.id,
+            chunkKey,
+            species,
+            x: tp.x,
+            y,
+            z: tp.z,
+            scale: tp.scale,
+            hBias: tp.hBias,
+            rotX,
+            rotY,
+            rotZ,
+            sx,
+            sy,
+            sz,
+            hp: maxHp,
+            maxHp,
+            tInst,
+            cInst,
+            instIdx: idx,
+            collider,
+          };
+          chunkTreeIds.push(tp.id);
+
           if (isChopped) {
-            placeStumpInGroup(chunkGroup, tp.x, y, tp.z, tp.scale, rotY);
+            const stumpGroup = placeStumpInGroup(chunkGroup, tp.x, y, tp.z, tp.scale, rotY);
+            const until = choppedUntilMap.get(tp.id) ?? envElapsedSec + 75 + rand() * 40;
+            choppedUntilMap.set(tp.id, until);
+            dormantChoppedTrees.set(tp.id, {
+              rec,
+              stumpGroup,
+              regrowTimer: Math.max(6, until - envElapsedSec),
+            });
           } else {
-            const colRadius = tp.id.startsWith('t_starter_') ? 0.72 * tp.scale : 0.68 * tp.scale;
-            const collider: ObstacleCollider = { x: tp.x, z: tp.z, radius: colRadius };
             chunkColliders.push(collider);
-            const maxHp = Math.max(95, Math.round(125 * tp.scale));
-            const rec: TreeInstanceRecord = {
-              id: tp.id,
-              chunkKey,
-              species,
-              x: tp.x,
-              y,
-              z: tp.z,
-              scale: tp.scale,
-              hBias: tp.hBias,
-              rotX,
-              rotY,
-              rotZ,
-              sx,
-              sy,
-              sz,
-              hp: maxHp,
-              maxHp,
-              tInst,
-              cInst,
-              instIdx: idx,
-              collider,
-            };
             activeTrees.set(tp.id, rec);
-            chunkTreeIds.push(tp.id);
           }
         });
         [tInst, cInst].forEach((inst) => {
@@ -2179,7 +2215,7 @@ export function buildWorldEnvironment(
         const z = minZ + rand() * CHUNK_SIZE;
         if (Math.abs(x) > WORLD_HALF_X - 14 || Math.abs(z) > WORLD_HALF_Z - 14) continue;
         if (biomeAt(x, z) !== 'desert') continue;
-        if (nearAnyCabin(x, z, 9.0) || nearAnyCave(x, z, 13.0)) continue;
+        if (nearAnyCabin(x, z, 9.0) || nearAnyCave(x, z, 13.0) || nearAnyDungeon(x, z, 10.5)) continue;
         if (Math.abs(x - riverCenterX(z)) < riverHalfWidthAt(z) + 3.5) continue;
         const y = groundHeightAt(x, z);
         if (y < WATER_LEVEL + 0.4) continue;
@@ -2221,6 +2257,7 @@ export function buildWorldEnvironment(
         if (Math.abs(x - riverCenterX(z)) < riverHalfWidthAt(z) + 2.8) continue;
         if (nearAnyCabin(x, z, 11.0)) continue;
         if (nearAnyCave(x, z, 13.0)) continue;
+        if (nearAnyDungeon(x, z, 11.5)) continue;
         if (nearVillage(x, z, 70)) continue;
         if (Math.hypot(x - FINAL_ARENA_X, z - FINAL_ARENA_Z) < FINAL_ARENA_RADIUS + 6) continue;
         const y = groundHeightAt(x, z);
@@ -2334,7 +2371,10 @@ export function buildWorldEnvironment(
         if (!wantedFloraNumSet.has(packChunkKey(ecx, ecz))) {
           group.remove(existing.chunkGroup);
           existing.insts.forEach((inst) => inst.dispose());
-          for (const tid of existing.treeIds) activeTrees.delete(tid);
+          for (const tid of existing.treeIds) {
+            activeTrees.delete(tid);
+            dormantChoppedTrees.delete(tid);
+          }
           activeFloraChunks.delete(k);
           collidersChanged = true;
         }
@@ -2531,7 +2571,9 @@ export function buildWorldEnvironment(
       if (!rec) return null;
       rec.hp = Math.max(0, rec.hp - damage);
       if (rec.hp <= 0) {
+        const regrowSec = 75 + Math.random() * 40;
         choppedTreeIds.add(id);
+        choppedUntilMap.set(id, envElapsedSec + regrowSec);
         activeTrees.delete(id);
         dummy.position.set(rec.x, rec.y - 20, rec.z);
         dummy.rotation.set(0, 0, 0);
@@ -2544,7 +2586,12 @@ export function buildWorldEnvironment(
 
         const chunk = activeFloraChunks.get(rec.chunkKey);
         if (chunk) {
-          placeStumpInGroup(chunk.chunkGroup, rec.x, rec.y, rec.z, rec.scale, rec.rotY);
+          const stumpGroup = placeStumpInGroup(chunk.chunkGroup, rec.x, rec.y, rec.z, rec.scale, rec.rotY);
+          dormantChoppedTrees.set(id, {
+            rec: { ...rec, hp: rec.maxHp },
+            stumpGroup,
+            regrowTimer: regrowSec,
+          });
           const ci = chunk.colliders.indexOf(rec.collider);
           if (ci !== -1) chunk.colliders.splice(ci, 1);
           syncColliders();
@@ -2649,7 +2696,10 @@ export function buildWorldEnvironment(
       if (existing) {
         group.remove(existing.chunkGroup);
         existing.insts.forEach((inst) => inst.dispose());
-        for (const tid of existing.treeIds) activeTrees.delete(tid);
+        for (const tid of existing.treeIds) {
+          activeTrees.delete(tid);
+          dormantChoppedTrees.delete(tid);
+        }
         activeFloraChunks.delete(centerKey);
         activeFloraChunks.set(centerKey, buildFloraChunk(pcx, pcz));
         syncColliders();
@@ -2691,7 +2741,10 @@ export function buildWorldEnvironment(
       for (const existing of activeFloraChunks.values()) {
         group.remove(existing.chunkGroup);
         existing.insts.forEach((inst) => inst.dispose());
-        for (const tid of existing.treeIds) activeTrees.delete(tid);
+        for (const tid of existing.treeIds) {
+          activeTrees.delete(tid);
+          dormantChoppedTrees.delete(tid);
+        }
       }
       activeFloraChunks.clear();
       lastPlayerCx = 999999;
@@ -2706,6 +2759,7 @@ export function buildWorldEnvironment(
       ensureChunksAround(px, pz, false);
     },
     update: (elapsed: number, dt: number) => {
+      envElapsedSec = elapsed;
       skyMat.uniforms.uTime.value = elapsed;
       waterUniforms.uTime.value = elapsed;
       sharedEnvUniforms.uTime.value = elapsed;
@@ -2713,6 +2767,47 @@ export function buildWorldEnvironment(
         waterUniforms.uWaterState.value === 3 ? 0.03 : waterUniforms.uWaterState.value === 1 ? 0.28 : 0.18;
       textures.waterRippleNormal.offset.y -= dt * flowSpeed;
       textures.waterRippleNormal.offset.x += dt * 0.035;
+
+      // Automatic tree regrowth (stump disappears & sapling grows back smoothly to full size)
+      for (const [id, dormant] of dormantChoppedTrees.entries()) {
+        dormant.regrowTimer -= dt;
+        if (dormant.regrowTimer <= 0) {
+          dormantChoppedTrees.delete(id);
+          choppedTreeIds.delete(id);
+          choppedUntilMap.delete(id);
+          const chunk = activeFloraChunks.get(dormant.rec.chunkKey);
+          if (chunk) {
+            chunk.chunkGroup.remove(dormant.stumpGroup);
+            const r = dormant.rec;
+            r.hp = r.maxHp;
+            activeTrees.set(id, r);
+            chunk.colliders.push(r.collider);
+            syncColliders();
+            growingTrees.push({ rec: r, progress: 0.15 });
+          }
+        }
+      }
+
+      for (let i = growingTrees.length - 1; i >= 0; i--) {
+        const g = growingTrees[i];
+        const r = g.rec;
+        if (!activeTrees.has(r.id)) {
+          growingTrees.splice(i, 1);
+          continue;
+        }
+        g.progress = Math.min(1, g.progress + dt * 0.48);
+        dummy.position.set(r.x, r.y - 0.25, r.z);
+        dummy.rotation.set(r.rotX, r.rotY, r.rotZ);
+        dummy.scale.set(r.sx * g.progress, r.sy * g.progress, r.sz * g.progress);
+        dummy.updateMatrix();
+        r.tInst.setMatrixAt(r.instIdx, dummy.matrix);
+        r.cInst.setMatrixAt(r.instIdx, dummy.matrix);
+        r.tInst.instanceMatrix.needsUpdate = true;
+        r.cInst.instanceMatrix.needsUpdate = true;
+        if (g.progress >= 1) {
+          growingTrees.splice(i, 1);
+        }
+      }
 
       for (let i = treeShakes.length - 1; i >= 0; i--) {
         const sh = treeShakes[i];

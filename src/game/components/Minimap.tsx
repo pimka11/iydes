@@ -126,6 +126,7 @@ const MinimapInner: React.FC<MinimapProps> = ({
       const isPinnedMarker =
         e.kind === 'cabin' ||
         e.kind === 'cave' ||
+        e.kind === 'dungeon' ||
         e.kind === 'quest' ||
         e.kind === 'boss' ||
         e.kind === 'village' ||
@@ -168,6 +169,18 @@ const MinimapInner: React.FC<MinimapProps> = ({
         ctx.lineTo(drawX - 4, drawY);
         ctx.closePath();
         ctx.fill();
+      } else if (e.kind === 'dungeon') {
+        ctx.fillStyle = '#c084fc';
+        ctx.beginPath();
+        ctx.moveTo(drawX, drawY - 4.2);
+        ctx.lineTo(drawX + 4.2, drawY);
+        ctx.lineTo(drawX, drawY + 4.2);
+        ctx.lineTo(drawX - 4.2, drawY);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#1e1b4b';
+        ctx.lineWidth = 1;
+        ctx.stroke();
       } else if (e.kind === 'merchant') {
         ctx.fillStyle = '#fde047';
         ctx.beginPath();

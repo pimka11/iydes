@@ -2,12 +2,16 @@ import React, { useState } from 'react';
 import { Smartphone, Download, X, AlertTriangle, ExternalLink, Copy, Check } from 'lucide-react';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
 import { CLIENT_APP_LABEL } from '../../version';
+import { getUiStrings } from '../i18n';
+import { LanguageCode } from '../types';
 
 interface PWAInstallButtonProps {
+  language?: LanguageCode;
   onModalOpenChange?: (open: boolean) => void;
 }
 
-export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ onModalOpenChange }) => {
+export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ language, onModalOpenChange }) => {
+  const s = getUiStrings(language);
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showGuide, setShowGuide] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -50,7 +54,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ onModalOpenC
         type="button"
         onMouseDown={(e) => e.preventDefault()}
         onClick={handleClick}
-        title="Встановити гру на телефон / APK"
+        title={s.installTitle}
         className="flex h-7 sm:h-8 items-center gap-1 rounded-lg sm:rounded-xl border border-emerald-500/45 bg-emerald-500/15 px-2 text-[11px] font-semibold text-emerald-800 dark:text-emerald-200 whitespace-nowrap shrink-0 transition-colors hover:bg-emerald-500/25 backdrop-blur-md"
       >
         {isInstallable && !isPrivatePreviewHost ? (
@@ -58,7 +62,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ onModalOpenC
         ) : (
           <Smartphone className="h-3.5 w-3.5" />
         )}
-        <span className="hidden sm:inline">На телефон</span>
+        <span className="hidden sm:inline">{s.installPhone}</span>
       </button>
 
       {showGuide && (
@@ -68,7 +72,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ onModalOpenC
               <div className="flex items-center gap-2">
                 <Smartphone className="h-5 w-5 text-emerald-500 dark:text-emerald-400" />
                 <h3 className="font-display text-base font-bold text-slate-900 dark:text-white">
-                  Як відкривати на телефоні / зробити APK
+                  {s.installTitle}
                 </h3>
               </div>
               <button
@@ -136,12 +140,12 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ onModalOpenC
                   {copied ? (
                     <>
                       <Check className="h-3.5 w-3.5 text-emerald-500" />
-                      <span className="text-emerald-700 dark:text-emerald-300">Посилання скопійовано</span>
+                      <span className="text-emerald-700 dark:text-emerald-300">{s.linkCopied}</span>
                     </>
                   ) : (
                     <>
                       <Copy className="h-3.5 w-3.5" />
-                      <span>Скопіювати посилання гри</span>
+                      <span>{s.copyLink}</span>
                     </>
                   )}
                 </button>
@@ -154,7 +158,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ onModalOpenC
               onClick={() => toggleGuide(false)}
               className="mt-3 w-full rounded-xl bg-emerald-500 py-2.5 font-display text-sm font-bold text-slate-950 hover:bg-emerald-400"
             >
-              Зрозуміло
+              {s.installGotIt}
             </button>
           </div>
         </div>

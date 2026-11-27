@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ProceduralTextures } from './textures';
 import {
   BRIDGE_HALF_LENGTH,
@@ -17,9 +18,55 @@ import {
   caveHalfWidthAt,
   cavePathCenterX,
   CaveSite,
+  DungeonSite,
+  getCabinDims,
+  isTwoStoryCabin,
   riverCenterX,
 } from './terrain';
 import { BuildPieceKind, MobKind, PeacefulMobKind, ResourceId, WeaponId } from './types';
+
+class StaticBoxBatcher {
+  private byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
+
+  add(
+    w: number,
+    h: number,
+    d: number,
+    x: number,
+    y: number,
+    z: number,
+    mat: THREE.Material,
+    rx = 0,
+    ry = 0,
+    rz = 0,
+  ) {
+    const g = new THREE.BoxGeometry(w, h, d);
+    if (rx !== 0) g.rotateX(rx);
+    if (ry !== 0) g.rotateY(ry);
+    if (rz !== 0) g.rotateZ(rz);
+    g.translate(x, y, z);
+    let arr = this.byMat.get(mat);
+    if (!arr) {
+      arr = [];
+      this.byMat.set(mat, arr);
+    }
+    arr.push(g);
+  }
+
+  flushInto(target: THREE.Group, noCastShadow = false) {
+    for (const [mat, geos] of this.byMat.entries()) {
+      if (geos.length === 0) continue;
+      const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos, false);
+      if (geos.length > 1) geos.forEach((g) => g.dispose());
+      if (merged) {
+        const m = new THREE.Mesh(merged, mat);
+        if (noCastShadow) m.userData.noCastShadow = true;
+        target.add(m);
+      }
+    }
+    this.byMat.clear();
+  }
+}
 
 export const HIT_FLASH_MAT = new THREE.MeshStandardMaterial({
   color: 0xffffff,
@@ -1007,8 +1054,17 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     const leaf = new THREE.Mesh(cachedBox(0.32, 0.08, 0.16), leafMat);
     leaf.position.set(0.14, 1.24, 0);
     leaf.rotation.z = -0.28;
+    const goldMat = new THREE.MeshStandardMaterial({ color: 0xfbbf24, metalness: 0.85, roughness: 0.22 });
+    const crownBand = new THREE.Mesh(cachedBox(0.54, 0.1, 0.54), goldMat);
+    crownBand.position.set(0, 1.07, 0);
+    const jewel = new THREE.Mesh(cachedBox(0.16, 0.16, 0.16), coreMat);
+    jewel.position.set(0, 1.14, 0.26);
+    const bubble1 = new THREE.Mesh(cachedBox(0.18, 0.18, 0.18), leafMat);
+    bubble1.position.set(-0.32, 0.72, -0.22);
+    const bubble2 = new THREE.Mesh(cachedBox(0.14, 0.14, 0.14), coreMat);
+    bubble2.position.set(0.34, 0.34, 0.28);
 
-    body.add(gelCube, core, eyeL, eyeR, glintL, glintR, stem, leaf);
+    body.add(gelCube, core, eyeL, eyeR, glintL, glintR, stem, leaf, crownBand, jewel, bubble1, bubble2);
     hitFlashMeshes.push(gelCube, core);
   } else if (kind === 'goblin') {
     const skinMat = new THREE.MeshStandardMaterial({ map: textures.goblinSkin, roughness: 0.78 });
@@ -1058,15 +1114,26 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     leftArm.position.set(-0.52, 1.48, 0);
     const lArmM = new THREE.Mesh(cachedBox(0.24, 0.68, 0.24), skinMat);
     lArmM.position.y = -0.34;
-    leftArm.add(lArmM);
+    const lPad = new THREE.Mesh(cachedBox(0.3, 0.22, 0.3), loinMat);
+    lPad.position.y = -0.02;
+    leftArm.add(lArmM, lPad);
 
     rightArm = new THREE.Group();
     rightArm.position.set(0.52, 1.48, 0);
     const rArmM = new THREE.Mesh(cachedBox(0.24, 0.68, 0.24), skinMat);
     rArmM.position.y = -0.34;
+    const rPad = lPad.clone();
     const club = new THREE.Mesh(cachedBox(0.18, 0.18, 0.84), clubMat);
     club.position.set(0, -0.62, 0.34);
-    rightArm.add(rArmM, club);
+    const clubRing = new THREE.Mesh(cachedBox(0.22, 0.22, 0.14), brassMat);
+    clubRing.position.set(0, -0.62, 0.62);
+    rightArm.add(rArmM, rPad, club, clubRing);
+
+    const quiverPack = new THREE.Mesh(cachedBox(0.46, 0.54, 0.24), loinMat);
+    quiverPack.position.set(0, 1.18, -0.32);
+    const earRing = new THREE.Mesh(cachedBox(0.08, 0.12, 0.08), brassMat);
+    earRing.position.set(-0.56, 0.2, 0.02);
+    head.add(earRing);
 
     leftLeg = new THREE.Group();
     leftLeg.position.set(-0.2, 0.7, 0);
@@ -1079,7 +1146,7 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     const rLegM = lLegM.clone();
     rightLeg.add(rLegM);
 
-    body.add(torso, belt, buckle, head, leftArm, rightArm, leftLeg, rightLeg);
+    body.add(torso, belt, buckle, quiverPack, head, leftArm, rightArm, leftLeg, rightLeg);
     hitFlashMeshes.push(torso, headMesh, lArmM, rArmM);
   } else if (kind === 'wolf') {
     const furMat = new THREE.MeshStandardMaterial({ map: textures.wolfFur, roughness: 0.85 });
@@ -1095,6 +1162,10 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     torso.position.y = 0.82;
     const chest = new THREE.Mesh(cachedBox(0.76, 0.7, 0.56), maneMat);
     chest.position.set(0, 0.86, 0.36);
+    const ridgeTuft = new THREE.Mesh(cachedBox(0.22, 0.16, 0.76), maneMat);
+    ridgeTuft.position.set(0, 1.18, -0.1);
+    const collar = new THREE.Mesh(cachedBox(0.66, 0.14, 0.16), fangMat);
+    collar.position.set(0, 0.94, 0.52);
 
     head = new THREE.Group();
     head.position.set(0, 0.98, 0.62);
@@ -1121,7 +1192,9 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     const tailMesh = new THREE.Mesh(cachedBox(0.18, 0.18, 0.62), maneMat);
     tailMesh.rotation.x = 0.45;
     tailMesh.position.set(0, 0.12, -0.28);
-    tail.add(tailMesh);
+    const tailTip = new THREE.Mesh(cachedBox(0.22, 0.22, 0.2), furMat);
+    tailTip.position.set(0, 0.26, -0.54);
+    tail.add(tailMesh, tailTip);
 
     const makePawLeg = (lx: number, lz: number) => {
       const lg = new THREE.Group();
@@ -1136,7 +1209,7 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     legBL = makePawLeg(-0.2, -0.44);
     legBR = makePawLeg(0.2, -0.44);
 
-    body.add(torso, chest, head, tail, legFL, legFR, legBL, legBR);
+    body.add(torso, chest, ridgeTuft, collar, head, tail, legFL, legFR, legBL, legBR);
     hitFlashMeshes.push(torso, chest, headMesh);
   } else if (kind === 'skeleton') {
     const boneMat = new THREE.MeshStandardMaterial({ map: textures.skeletonBone, roughness: 0.74 });
@@ -1152,6 +1225,13 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     torso.position.y = 1.28;
     const pelvis = new THREE.Mesh(cachedBox(0.64, 0.22, 0.36), darkBoneMat);
     pelvis.position.y = 0.86;
+    const ribBar1 = new THREE.Mesh(cachedBox(0.74, 0.1, 0.44), darkBoneMat);
+    ribBar1.position.y = 1.46;
+    const ribBar2 = ribBar1.clone();
+    ribBar2.position.y = 1.22;
+    const quiver = new THREE.Mesh(cachedBox(0.22, 0.66, 0.18), ironMat);
+    quiver.position.set(-0.16, 1.38, -0.28);
+    quiver.rotation.z = 0.3;
 
     head = new THREE.Group();
     head.position.set(0, 1.74, 0);
@@ -1159,6 +1239,8 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     skull.position.y = 0.3;
     const helm = new THREE.Mesh(cachedBox(0.64, 0.24, 0.64), ironMat);
     helm.position.y = 0.52;
+    const helmCrest = new THREE.Mesh(cachedBox(0.12, 0.2, 0.48), eyeGlowMat);
+    helmCrest.position.set(0, 0.7, 0);
     const eyeL = new THREE.Mesh(cachedBox(0.12, 0.1, 0.06), eyeGlowMat);
     eyeL.position.set(-0.13, 0.3, 0.29);
     const eyeR = eyeL.clone();
@@ -1168,23 +1250,27 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     const jawMesh = new THREE.Mesh(cachedBox(0.36, 0.12, 0.32), darkBoneMat);
     jawMesh.position.set(0, 0, 0.14);
     jaw.add(jawMesh);
-    head.add(skull, helm, eyeL, eyeR, jaw);
+    head.add(skull, helm, helmCrest, eyeL, eyeR, jaw);
 
     leftArm = new THREE.Group();
     leftArm.position.set(-0.48, 1.66, 0);
     const lBoneArm = new THREE.Mesh(cachedBox(0.18, 0.78, 0.18), boneMat);
     lBoneArm.position.y = -0.39;
+    const lPauldron = new THREE.Mesh(cachedBox(0.3, 0.24, 0.3), ironMat);
     const shield = new THREE.Mesh(cachedBox(0.1, 0.68, 0.52), ironMat);
     shield.position.set(-0.14, -0.45, 0.16);
-    leftArm.add(lBoneArm, shield);
+    const shieldBoss = new THREE.Mesh(cachedBox(0.14, 0.2, 0.2), eyeGlowMat);
+    shieldBoss.position.set(-0.15, -0.45, 0.16);
+    leftArm.add(lBoneArm, lPauldron, shield, shieldBoss);
 
     rightArm = new THREE.Group();
     rightArm.position.set(0.48, 1.66, 0);
     const rBoneArm = new THREE.Mesh(cachedBox(0.18, 0.78, 0.18), boneMat);
     rBoneArm.position.y = -0.39;
+    const rPauldron = lPauldron.clone();
     const blade = new THREE.Mesh(cachedBox(0.1, 0.14, 0.96), ironMat);
     blade.position.set(0, -0.68, 0.48);
-    rightArm.add(rBoneArm, blade);
+    rightArm.add(rBoneArm, rPauldron, blade);
 
     leftLeg = new THREE.Group();
     leftLeg.position.set(-0.2, 0.8, 0);
@@ -1196,7 +1282,7 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     rightLeg.position.set(0.2, 0.8, 0);
     rightLeg.add(lBoneLeg.clone());
 
-    body.add(torso, pelvis, head, leftArm, rightArm, leftLeg, rightLeg);
+    body.add(torso, pelvis, ribBar1, ribBar2, quiver, head, leftArm, rightArm, leftLeg, rightLeg);
     hitFlashMeshes.push(torso, skull, lBoneArm, rBoneArm);
   } else if (kind === 'golem') {
     const stoneMat = new THREE.MeshStandardMaterial({ map: textures.golemStone, roughness: 0.9 });
@@ -1213,16 +1299,22 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     core.position.set(0, 1.78, 0.5);
     const mossCap = new THREE.Mesh(cachedBox(1.62, 0.24, 1.02), mossMat);
     mossCap.position.y = 2.42;
+    const runeBelt = new THREE.Mesh(cachedBox(1.64, 0.2, 1.02), runeMat);
+    runeBelt.position.y = 1.18;
+    const spinePeak = new THREE.Mesh(cachedBox(0.36, 0.62, 0.36), stoneMat);
+    spinePeak.position.set(0, 2.38, -0.56);
 
     head = new THREE.Group();
     head.position.set(0, 2.58, 0);
     const headBlock = new THREE.Mesh(cachedBox(0.84, 0.78, 0.82), stoneMat);
     headBlock.position.y = 0.39;
+    const browRidge = new THREE.Mesh(cachedBox(0.92, 0.18, 0.22), mossMat);
+    browRidge.position.set(0, 0.66, 0.38);
     const eyeL = new THREE.Mesh(cachedBox(0.16, 0.12, 0.08), runeMat);
     eyeL.position.set(-0.2, 0.4, 0.42);
     const eyeR = eyeL.clone();
     eyeR.position.x = 0.2;
-    head.add(headBlock, eyeL, eyeR);
+    head.add(headBlock, browRidge, eyeL, eyeR);
 
     aura = new THREE.Group();
     aura.position.set(0, 1.75, 0);
@@ -1235,15 +1327,16 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
 
     leftArm = new THREE.Group();
     leftArm.position.set(-1.08, 2.26, 0);
+    const lShoulderBould = new THREE.Mesh(cachedBox(0.68, 0.56, 0.68), mossMat);
     const lFist = new THREE.Mesh(cachedBox(0.52, 1.32, 0.52), stoneMat);
     lFist.position.y = -0.66;
     const lRune = new THREE.Mesh(cachedBox(0.56, 0.16, 0.56), runeMat);
     lRune.position.y = -1.04;
-    leftArm.add(lFist, lRune);
+    leftArm.add(lShoulderBould, lFist, lRune);
 
     rightArm = new THREE.Group();
     rightArm.position.set(1.08, 2.26, 0);
-    rightArm.add(lFist.clone(), lRune.clone());
+    rightArm.add(lShoulderBould.clone(), lFist.clone(), lRune.clone());
 
     leftLeg = new THREE.Group();
     leftLeg.position.set(-0.44, 1.04, 0);
@@ -1255,7 +1348,7 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     rightLeg.position.set(0.44, 1.04, 0);
     rightLeg.add(lLegM.clone());
 
-    body.add(torso, core, mossCap, head, aura, leftArm, rightArm, leftLeg, rightLeg);
+    body.add(torso, core, mossCap, runeBelt, spinePeak, head, aura, leftArm, rightArm, leftLeg, rightLeg);
     hitFlashMeshes.push(torso, headBlock, lFist);
   } else if (kind === 'final_boss') {
     const obsidianMat = new THREE.MeshStandardMaterial({
@@ -1314,31 +1407,40 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     leftArm = new THREE.Group();
     leftArm.position.set(-1.14, 3.12, 0);
     const lShoulder = new THREE.Mesh(cachedBox(0.68, 0.5, 0.68), obsidianMat);
+    const lSpike = new THREE.Mesh(cachedBox(0.24, 0.52, 0.24), voidVioletMat);
+    lSpike.position.set(-0.22, 0.42, 0);
     const lArmM = new THREE.Mesh(cachedBox(0.48, 1.38, 0.48), obsidianMat);
     lArmM.position.y = -0.68;
-    leftArm.add(lShoulder, lArmM);
+    const lCuff = new THREE.Mesh(cachedBox(0.54, 0.2, 0.54), magmaMat);
+    lCuff.position.y = -1.2;
+    leftArm.add(lShoulder, lSpike, lArmM, lCuff);
 
     rightArm = new THREE.Group();
     rightArm.position.set(1.14, 3.12, 0);
     const rShoulder = lShoulder.clone();
+    const rSpike = lSpike.clone();
+    rSpike.position.x = 0.22;
     const rArmM = lArmM.clone();
+    const rCuff = lCuff.clone();
     const hilt = new THREE.Mesh(cachedBox(0.46, 0.14, 0.14), obsidianMat);
     hilt.position.set(0, -1.12, 0.34);
     const blade = new THREE.Mesh(cachedBox(0.22, 0.22, 2.35), obsidianMat);
     blade.position.set(0, -1.25, 1.15);
     const bladeRune = new THREE.Mesh(cachedBox(0.26, 0.1, 1.95), magmaMat);
     bladeRune.position.set(0, -1.25, 1.15);
-    rightArm.add(rShoulder, rArmM, hilt, blade, bladeRune);
+    rightArm.add(rShoulder, rSpike, rArmM, rCuff, hilt, blade, bladeRune);
 
     leftLeg = new THREE.Group();
     leftLeg.position.set(-0.44, 1.54, 0);
     const lLegM = new THREE.Mesh(cachedBox(0.58, 1.54, 0.58), obsidianMat);
     lLegM.position.y = -0.77;
-    leftLeg.add(lLegM);
+    const lKnee = new THREE.Mesh(cachedBox(0.64, 0.24, 0.2), voidVioletMat);
+    lKnee.position.set(0, -0.68, 0.26);
+    leftLeg.add(lLegM, lKnee);
 
     rightLeg = new THREE.Group();
     rightLeg.position.set(0.44, 1.54, 0);
-    rightLeg.add(lLegM.clone());
+    rightLeg.add(lLegM.clone(), lKnee.clone());
 
     body.add(torso, ribPlate, core, auraGroup, cape, head, leftArm, rightArm, leftLeg, rightLeg);
     hitFlashMeshes.push(torso, headMesh, lArmM, rArmM);
@@ -1393,6 +1495,17 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     cape.position.set(0, 2.24, -0.62);
     cape.rotation.x = 0.16;
 
+    wingL = new THREE.Group();
+    wingL.position.set(-0.75, 2.9, -0.52);
+    const aWingL = new THREE.Mesh(cachedBox(1.15, 0.62, 0.12), cyanEnergyMat);
+    aWingL.position.set(-0.62, 0.24, -0.06);
+    wingL.add(aWingL);
+    wingR = new THREE.Group();
+    wingR.position.set(0.75, 2.9, -0.52);
+    const aWingR = aWingL.clone();
+    aWingR.position.x = 0.62;
+    wingR.add(aWingR);
+
     head = new THREE.Group();
     head.position.set(0, 3.68, 0);
     const headMesh = new THREE.Mesh(cachedBox(1.02, 1.02, 1.02), astralArmorMat);
@@ -1401,20 +1514,27 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     visor.position.set(0, 0.52, 0.52);
     const crownSpire = new THREE.Mesh(cachedBox(0.28, 0.78, 0.28), astralGoldMat);
     crownSpire.position.set(0, 1.32, 0);
-    head.add(headMesh, visor, crownSpire);
+    const cWingL = new THREE.Mesh(cachedBox(0.18, 0.44, 0.18), cyanEnergyMat);
+    cWingL.position.set(-0.42, 1.12, 0);
+    const cWingR = cWingL.clone();
+    cWingR.position.x = 0.42;
+    head.add(headMesh, visor, crownSpire, cWingL, cWingR);
 
     leftArm = new THREE.Group();
     leftArm.position.set(-1.24, 3.38, 0);
     const lShoulder = new THREE.Mesh(cachedBox(0.76, 0.54, 0.76), astralArmorMat);
+    const lShoulderTrim = new THREE.Mesh(cachedBox(0.82, 0.16, 0.82), astralGoldMat);
+    lShoulderTrim.position.y = 0.24;
     const lArmM = new THREE.Mesh(cachedBox(0.52, 1.48, 0.52), astralArmorMat);
     lArmM.position.y = -0.74;
     const lGauntlet = new THREE.Mesh(cachedBox(0.58, 0.24, 0.58), cyanEnergyMat);
     lGauntlet.position.y = -1.42;
-    leftArm.add(lShoulder, lArmM, lGauntlet);
+    leftArm.add(lShoulder, lShoulderTrim, lArmM, lGauntlet);
 
     rightArm = new THREE.Group();
     rightArm.position.set(1.24, 3.38, 0);
     const rShoulder = lShoulder.clone();
+    const rShoulderTrim = lShoulderTrim.clone();
     const rArmM = lArmM.clone();
     const pole = new THREE.Mesh(cachedBox(0.16, 0.16, 3.1), astralGoldMat);
     pole.position.set(0, -1.35, 0.95);
@@ -1422,19 +1542,21 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     halberdAxe.position.set(0, -1.35, 2.05);
     const halberdEdge = new THREE.Mesh(cachedBox(0.18, 0.92, 0.22), cyanEnergyMat);
     halberdEdge.position.set(0, -1.35, 2.38);
-    rightArm.add(rShoulder, rArmM, pole, halberdAxe, halberdEdge);
+    rightArm.add(rShoulder, rShoulderTrim, rArmM, pole, halberdAxe, halberdEdge);
 
     leftLeg = new THREE.Group();
     leftLeg.position.set(-0.48, 1.72, 0);
     const lLegM = new THREE.Mesh(cachedBox(0.62, 1.72, 0.62), astralArmorMat);
     lLegM.position.y = -0.86;
-    leftLeg.add(lLegM);
+    const lGreave = new THREE.Mesh(cachedBox(0.68, 0.22, 0.68), astralGoldMat);
+    lGreave.position.y = -0.65;
+    leftLeg.add(lLegM, lGreave);
 
     rightLeg = new THREE.Group();
     rightLeg.position.set(0.48, 1.72, 0);
-    rightLeg.add(lLegM.clone());
+    rightLeg.add(lLegM.clone(), lGreave.clone());
 
-    body.add(torso, beltTrim, chestCore, auraGroup, cape, head, leftArm, rightArm, leftLeg, rightLeg);
+    body.add(torso, beltTrim, chestCore, auraGroup, cape, wingL, wingR, head, leftArm, rightArm, leftLeg, rightLeg);
     hitFlashMeshes.push(torso, headMesh, lArmM, rArmM);
   } else if (kind === 'boss') {
     const darkArmor = new THREE.MeshStandardMaterial({ map: textures.bossArmor, metalness: 0.82, roughness: 0.25 });
@@ -1479,22 +1601,39 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     hornR.rotation.z = -0.36;
     head.add(headMesh, visor, hornL, hornR);
 
+    wingL = new THREE.Group();
+    wingL.position.set(-0.52, 2.1, -0.36);
+    const bWingL = new THREE.Mesh(cachedBox(0.74, 0.44, 0.1), crimsonMat);
+    bWingL.position.set(-0.4, 0.14, 0);
+    wingL.add(bWingL);
+    wingR = new THREE.Group();
+    wingR.position.set(0.52, 2.1, -0.36);
+    const bWingR = bWingL.clone();
+    bWingR.position.x = 0.4;
+    wingR.add(bWingR);
+
     leftArm = new THREE.Group();
     leftArm.position.set(-0.84, 2.38, 0);
     const lShoulder = new THREE.Mesh(cachedBox(0.52, 0.42, 0.52), darkArmor);
+    const lSpike = new THREE.Mesh(cachedBox(0.16, 0.32, 0.16), crimsonMat);
+    lSpike.position.set(-0.14, 0.3, 0);
     const lArmM = new THREE.Mesh(cachedBox(0.38, 1.04, 0.38), darkArmor);
     lArmM.position.y = -0.52;
-    leftArm.add(lShoulder, lArmM);
+    const lGaunt = new THREE.Mesh(cachedBox(0.42, 0.18, 0.42), crimsonMat);
+    lGaunt.position.y = -0.92;
+    leftArm.add(lShoulder, lSpike, lArmM, lGaunt);
 
     rightArm = new THREE.Group();
     rightArm.position.set(0.84, 2.38, 0);
     const rShoulder = lShoulder.clone();
+    const rSpike = lSpike.clone();
+    rSpike.position.x = 0.14;
     const rArmM = lArmM.clone();
     const blade = new THREE.Mesh(cachedBox(0.16, 0.18, 1.65), darkArmor);
     blade.position.set(0, -0.9, 0.78);
     const bladeRune = new THREE.Mesh(cachedBox(0.2, 0.08, 1.3), crimsonMat);
     bladeRune.position.set(0, -0.9, 0.78);
-    rightArm.add(rShoulder, rArmM, blade, bladeRune);
+    rightArm.add(rShoulder, rSpike, rArmM, lGaunt.clone(), blade, bladeRune);
 
     leftLeg = new THREE.Group();
     leftLeg.position.set(-0.32, 1.18, 0);
@@ -1506,16 +1645,21 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     rightLeg.position.set(0.32, 1.18, 0);
     rightLeg.add(lLegM.clone());
 
-    body.add(torso, beltPlate, chestGem, cape, auraGroup, head, leftArm, rightArm, leftLeg, rightLeg);
+    body.add(torso, beltPlate, chestGem, cape, auraGroup, wingL, wingR, head, leftArm, rightArm, leftLeg, rightLeg);
     hitFlashMeshes.push(torso, headMesh, lArmM, rArmM);
   } else if (kind === 'mushroom_imp') {
     const stemMat = new THREE.MeshStandardMaterial({ map: textures.skeletonBone, color: 0xfef3c7, roughness: 0.78 });
     const capMat = new THREE.MeshStandardMaterial({ map: textures.mushroomCap, roughness: 0.6 });
     const gillMat = new THREE.MeshStandardMaterial({ color: 0xfde68a, roughness: 0.85 });
+    const vineMat = new THREE.MeshStandardMaterial({ color: 0x4d7c0f, roughness: 0.82 });
     const eyeMat = new THREE.MeshStandardMaterial({ color: 0xfef08a, emissive: 0xfacc15, emissiveIntensity: 1.7 });
 
     const torso = new THREE.Mesh(cachedBox(0.64, 0.72, 0.44), stemMat);
     torso.position.y = 0.66;
+    const mossSash = new THREE.Mesh(cachedBox(0.7, 0.14, 0.5), vineMat);
+    mossSash.position.y = 0.56;
+    const capPack = new THREE.Mesh(cachedBox(0.42, 0.44, 0.24), gillMat);
+    capPack.position.set(0, 0.72, -0.32);
 
     head = new THREE.Group();
     head.position.set(0, 1.02, 0);
@@ -1523,54 +1667,77 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     capRim.position.y = 0.1;
     const cap = new THREE.Mesh(cachedBox(1.36, 0.54, 1.36), capMat);
     cap.position.y = 0.36;
+    const capCrown = new THREE.Mesh(cachedBox(0.84, 0.2, 0.84), capMat);
+    capCrown.position.y = 0.68;
+    const spotF = new THREE.Mesh(cachedBox(0.24, 0.12, 0.08), gillMat);
+    spotF.position.set(0.3, 0.4, 0.7);
+    const spotB = spotF.clone();
+    spotB.position.set(-0.28, 0.44, -0.7);
     const eyeL = new THREE.Mesh(cachedBox(0.12, 0.14, 0.06), eyeMat);
     eyeL.position.set(-0.14, -0.1, 0.24);
     const eyeR = eyeL.clone();
     eyeR.position.x = 0.14;
-    head.add(capRim, cap, eyeL, eyeR);
+    head.add(capRim, cap, capCrown, spotF, spotB, eyeL, eyeR);
 
     leftLeg = new THREE.Group();
     leftLeg.position.set(-0.18, 0.34, 0);
     const lLegM = new THREE.Mesh(cachedBox(0.22, 0.34, 0.22), stemMat);
     lLegM.position.y = -0.17;
-    leftLeg.add(lLegM);
+    const lRoot = new THREE.Mesh(cachedBox(0.26, 0.1, 0.28), vineMat);
+    lRoot.position.y = -0.3;
+    leftLeg.add(lLegM, lRoot);
     rightLeg = new THREE.Group();
     rightLeg.position.set(0.18, 0.34, 0);
-    rightLeg.add(lLegM.clone());
+    rightLeg.add(lLegM.clone(), lRoot.clone());
 
     leftArm = new THREE.Group();
     leftArm.position.set(-0.42, 0.84, 0);
     const lArmM = new THREE.Mesh(cachedBox(0.18, 0.46, 0.18), stemMat);
     lArmM.position.y = -0.23;
-    leftArm.add(lArmM);
+    const lCuff = new THREE.Mesh(cachedBox(0.22, 0.12, 0.22), vineMat);
+    lCuff.position.y = -0.38;
+    leftArm.add(lArmM, lCuff);
     rightArm = new THREE.Group();
     rightArm.position.set(0.42, 0.84, 0);
     const rArmM = lArmM.clone();
     const sporeOrb = new THREE.Mesh(cachedBox(0.22, 0.22, 0.22), eyeMat);
     sporeOrb.position.set(0, -0.45, 0.12);
-    rightArm.add(rArmM, sporeOrb);
+    rightArm.add(rArmM, lCuff.clone(), sporeOrb);
 
-    body.add(torso, head, leftLeg, rightLeg, leftArm, rightArm);
+    body.add(torso, mossSash, capPack, head, leftLeg, rightLeg, leftArm, rightArm);
     hitFlashMeshes.push(torso, cap);
   } else if (kind === 'dire_boar') {
     const furMat = new THREE.MeshStandardMaterial({ map: textures.boarHide, roughness: 0.85 });
     const ridgeMat = new THREE.MeshStandardMaterial({ color: 0x271308, roughness: 0.9 });
     const tuskMat = new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.4 });
+    const ironMat = new THREE.MeshStandardMaterial({ color: 0x64748b, metalness: 0.82, roughness: 0.32 });
     const eyeMat = new THREE.MeshStandardMaterial({ color: 0xef4444, emissive: 0xdc2626, emissiveIntensity: 1.65 });
 
     const torso = new THREE.Mesh(cachedBox(0.92, 0.82, 1.38), furMat);
     torso.position.y = 0.86;
     const mane = new THREE.Mesh(cachedBox(0.24, 0.22, 1.2), ridgeMat);
     mane.position.set(0, 1.34, 0.02);
+    const harness = new THREE.Mesh(cachedBox(0.98, 0.52, 0.24), ironMat);
+    harness.position.set(0, 0.88, 0.34);
+    const flankPlate = new THREE.Mesh(cachedBox(0.98, 0.38, 0.22), ridgeMat);
+    flankPlate.position.set(0, 0.9, -0.28);
 
     head = new THREE.Group();
     head.position.set(0, 0.88, 0.7);
     const headMesh = new THREE.Mesh(cachedBox(0.72, 0.64, 0.56), furMat);
     headMesh.position.set(0, 0, 0.22);
+    const browPlate = new THREE.Mesh(cachedBox(0.68, 0.16, 0.44), ironMat);
+    browPlate.position.set(0, 0.28, 0.24);
+    const earL = new THREE.Mesh(cachedBox(0.18, 0.12, 0.1), ridgeMat);
+    earL.position.set(-0.38, 0.24, 0.12);
+    const earR = earL.clone();
+    earR.position.x = 0.38;
     const snout = new THREE.Mesh(cachedBox(0.4, 0.28, 0.24), ridgeMat);
     snout.position.set(0, -0.1, 0.56);
-    const tuskL = new THREE.Mesh(cachedBox(0.08, 0.24, 0.08), tuskMat);
-    tuskL.position.set(-0.22, -0.04, 0.58);
+    const noseRing = new THREE.Mesh(cachedBox(0.18, 0.14, 0.08), ironMat);
+    noseRing.position.set(0, -0.16, 0.69);
+    const tuskL = new THREE.Mesh(cachedBox(0.08, 0.28, 0.08), tuskMat);
+    tuskL.position.set(-0.22, -0.02, 0.58);
     tuskL.rotation.x = 0.45;
     const tuskR = tuskL.clone();
     tuskR.position.x = 0.22;
@@ -1578,27 +1745,31 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     eyeL.position.set(-0.22, 0.14, 0.5);
     const eyeR = eyeL.clone();
     eyeR.position.x = 0.22;
-    head.add(headMesh, snout, tuskL, tuskR, eyeL, eyeR);
+    head.add(headMesh, browPlate, earL, earR, snout, noseRing, tuskL, tuskR, eyeL, eyeR);
 
     tail = new THREE.Group();
     tail.position.set(0, 0.94, -0.72);
-    const tailM = new THREE.Mesh(cachedBox(0.1, 0.1, 0.3), ridgeMat);
+    const tailM = new THREE.Mesh(cachedBox(0.1, 0.1, 0.34), ridgeMat);
     tailM.position.set(0, 0.06, -0.15);
-    tail.add(tailM);
+    const tailTuft = new THREE.Mesh(cachedBox(0.14, 0.14, 0.12), furMat);
+    tailTuft.position.set(0, 0.08, -0.34);
+    tail.add(tailM, tailTuft);
 
     const makeHoofLeg = (x: number, z: number) => {
       const lg = new THREE.Group();
       lg.position.set(x, 0.52, z);
-      const m = new THREE.Mesh(cachedBox(0.24, 0.52, 0.24), furMat);
-      m.position.y = -0.26;
-      lg.add(m);
+      const m = new THREE.Mesh(cachedBox(0.24, 0.42, 0.24), furMat);
+      m.position.y = -0.21;
+      const hoof = new THREE.Mesh(cachedBox(0.26, 0.12, 0.26), ridgeMat);
+      hoof.position.y = -0.46;
+      lg.add(m, hoof);
       return lg;
     };
     legFL = makeHoofLeg(-0.34, 0.48);
     legFR = makeHoofLeg(0.34, 0.48);
     legBL = makeHoofLeg(-0.34, -0.48);
     legBR = makeHoofLeg(0.34, -0.48);
-    body.add(torso, mane, head, tail, legFL, legFR, legBL, legBR);
+    body.add(torso, mane, harness, flankPlate, head, tail, legFL, legFR, legBL, legBR);
     hitFlashMeshes.push(torso, headMesh);
   } else if (kind === 'giant_spider') {
     const chMat = new THREE.MeshStandardMaterial({ map: textures.spiderChitin, roughness: 0.55 });
@@ -1608,18 +1779,26 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
 
     const abd = new THREE.Mesh(cachedBox(1.18, 0.92, 1.38), chMat);
     abd.position.set(0, 0.76, -0.62);
+    const abdStripe1 = new THREE.Mesh(cachedBox(1.22, 0.14, 0.24), eyeMat);
+    abdStripe1.position.set(0, 1.18, -0.44);
+    const abdStripe2 = new THREE.Mesh(cachedBox(1.22, 0.14, 0.24), eyeMat);
+    abdStripe2.position.set(0, 1.18, -0.84);
+    const spinneret = new THREE.Mesh(cachedBox(0.38, 0.28, 0.26), jointMat);
+    spinneret.position.set(0, 0.68, -1.36);
 
     head = new THREE.Group();
     head.position.set(0, 0.64, 0.34);
     const cephalo = new THREE.Mesh(cachedBox(0.76, 0.54, 0.72), chMat);
-    head.add(cephalo);
+    const crest = new THREE.Mesh(cachedBox(0.56, 0.12, 0.52), jointMat);
+    crest.position.set(0, 0.3, -0.02);
+    head.add(cephalo, crest);
     for (const ex of [-0.22, -0.08, 0.08, 0.22]) {
       const eye = new THREE.Mesh(cachedBox(0.09, 0.09, 0.06), eyeMat);
       eye.position.set(ex, 0.08, 0.37);
       head.add(eye);
     }
     for (const fx of [-0.14, 0.14]) {
-      const mand = new THREE.Mesh(cachedBox(0.09, 0.18, 0.1), fangMat);
+      const mand = new THREE.Mesh(cachedBox(0.09, 0.22, 0.1), fangMat);
       mand.position.set(fx, -0.14, 0.38);
       head.add(mand);
     }
@@ -1631,9 +1810,11 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
       const femur = new THREE.Mesh(cachedBox(0.68, 0.14, 0.14), chMat);
       femur.position.set(Math.sign(x) * 0.34, 0.16, 0);
       femur.rotation.z = Math.sign(x) * 0.32;
+      const knee = new THREE.Mesh(cachedBox(0.18, 0.2, 0.18), eyeMat);
+      knee.position.set(Math.sign(x) * 0.66, 0.24, 0);
       const tibia = new THREE.Mesh(cachedBox(0.14, 0.72, 0.14), jointMat);
       tibia.position.set(Math.sign(x) * 0.68, -0.16, 0);
-      lg.add(femur, tibia);
+      lg.add(femur, knee, tibia);
       return lg;
     };
     legFL = makeSpiderLeg(-0.36, 0.42, -0.25);
@@ -1643,51 +1824,68 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     legBL = makeSpiderLeg(-0.36, -0.24, 0.28);
     legBR = makeSpiderLeg(0.36, -0.24, -0.28);
     extraLimbs = [extraML, extraMR];
-    body.add(abd, head, legFL, legFR, extraML, extraMR, legBL, legBR);
+    body.add(abd, abdStripe1, abdStripe2, spinneret, head, legFL, legFR, extraML, extraMR, legBL, legBR);
     hitFlashMeshes.push(abd, cephalo);
   } else if (kind === 'forest_ent') {
     const barkMat = new THREE.MeshStandardMaterial({ map: textures.entBark, roughness: 0.9 });
     const leafMat = new THREE.MeshStandardMaterial({ map: textures.leafCluster, color: 0x16a34a, roughness: 0.78 });
     const eyeMat = new THREE.MeshStandardMaterial({ color: 0xa3e635, emissive: 0x84cc16, emissiveIntensity: 1.75 });
+    const bloomMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0xca8a04, emissiveIntensity: 0.8 });
 
     const torso = new THREE.Mesh(cachedBox(1.24, 1.72, 0.92), barkMat);
     torso.position.y = 1.66;
-    const mossCollar = new THREE.Mesh(cachedBox(1.32, 0.28, 1.0), leafMat);
+    const mossCollar = new THREE.Mesh(cachedBox(1.36, 0.3, 1.04), leafMat);
     mossCollar.position.y = 2.42;
+    const heartRune = new THREE.Mesh(cachedBox(0.38, 0.44, 0.12), eyeMat);
+    heartRune.position.set(0, 1.75, 0.46);
+    const backVine = new THREE.Mesh(cachedBox(0.64, 0.92, 0.2), leafMat);
+    backVine.position.set(0, 1.72, -0.5);
 
     head = new THREE.Group();
     head.position.set(0, 2.52, 0);
     const crown = new THREE.Mesh(cachedBox(1.56, 0.96, 1.44), leafMat);
     crown.position.y = 0.48;
+    const crownTop = new THREE.Mesh(cachedBox(1.02, 0.34, 0.98), leafMat);
+    crownTop.position.y = 1.02;
+    const branchL = new THREE.Mesh(cachedBox(0.16, 0.56, 0.16), barkMat);
+    branchL.position.set(-0.78, 0.54, 0);
+    branchL.rotation.z = 0.5;
+    const branchR = branchL.clone();
+    branchR.position.x = 0.78;
+    branchR.rotation.z = -0.5;
     const faceBark = new THREE.Mesh(cachedBox(0.84, 0.72, 0.84), barkMat);
     faceBark.position.y = 0.08;
     const eyeL = new THREE.Mesh(cachedBox(0.16, 0.12, 0.08), eyeMat);
     eyeL.position.set(-0.2, 0.14, 0.44);
     const eyeR = eyeL.clone();
     eyeR.position.x = 0.2;
-    head.add(crown, faceBark, eyeL, eyeR);
+    head.add(crown, crownTop, branchL, branchR, faceBark, eyeL, eyeR);
 
     leftArm = new THREE.Group();
     leftArm.position.set(-0.84, 2.25, 0);
     const lArmM = new THREE.Mesh(cachedBox(0.38, 1.28, 0.38), barkMat);
     lArmM.position.y = -0.64;
-    const lLeafClump = new THREE.Mesh(cachedBox(0.52, 0.36, 0.52), leafMat);
-    lLeafClump.position.y = -0.1;
-    leftArm.add(lArmM, lLeafClump);
+    const lLeafClump = new THREE.Mesh(cachedBox(0.56, 0.4, 0.56), leafMat);
+    lLeafClump.position.y = -0.06;
+    const lBloom = new THREE.Mesh(cachedBox(0.18, 0.18, 0.18), bloomMat);
+    lBloom.position.set(-0.24, -0.08, 0.24);
+    leftArm.add(lArmM, lLeafClump, lBloom);
     rightArm = new THREE.Group();
     rightArm.position.set(0.84, 2.25, 0);
-    rightArm.add(lArmM.clone(), lLeafClump.clone());
+    rightArm.add(lArmM.clone(), lLeafClump.clone(), lBloom.clone());
 
     leftLeg = new THREE.Group();
     leftLeg.position.set(-0.34, 0.8, 0);
     const lLegM = new THREE.Mesh(cachedBox(0.44, 0.8, 0.44), barkMat);
     lLegM.position.y = -0.4;
-    leftLeg.add(lLegM);
+    const lRootToe = new THREE.Mesh(cachedBox(0.52, 0.18, 0.56), leafMat);
+    lRootToe.position.y = -0.7;
+    leftLeg.add(lLegM, lRootToe);
     rightLeg = new THREE.Group();
     rightLeg.position.set(0.34, 0.8, 0);
-    rightLeg.add(lLegM.clone());
+    rightLeg.add(lLegM.clone(), lRootToe.clone());
 
-    body.add(torso, mossCollar, head, leftArm, rightArm, leftLeg, rightLeg);
+    body.add(torso, mossCollar, heartRune, backVine, head, leftArm, rightArm, leftLeg, rightLeg);
     hitFlashMeshes.push(torso, crown, faceBark);
   } else if (kind === 'bandit_raider' || kind === 'dune_stalker' || kind === 'swamp_witch') {
     const coatHex = kind === 'bandit_raider' ? 0x64748b : kind === 'dune_stalker' ? 0xf59e0b : 0x4d7c0f;
@@ -1701,8 +1899,14 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
 
     const torso = new THREE.Mesh(cachedBox(0.76, 0.92, 0.44), coatMat);
     torso.position.y = 1.24;
-    const belt = new THREE.Mesh(cachedBox(0.8, 0.14, 0.48), leatherMat);
+    const belt = new THREE.Mesh(cachedBox(0.82, 0.14, 0.48), leatherMat);
     belt.position.y = 0.86;
+    const buckle = new THREE.Mesh(cachedBox(0.18, 0.16, 0.1), steelMat);
+    buckle.position.set(0, 0.86, 0.25);
+    const sash = new THREE.Mesh(cachedBox(0.8, 0.16, 0.48), hoodMat);
+    sash.position.y = 1.54;
+    const pouch = new THREE.Mesh(cachedBox(0.18, 0.22, 0.18), leatherMat);
+    pouch.position.set(0.38, 0.84, 0.1);
     const cape = new THREE.Mesh(new THREE.PlaneGeometry(0.82, 1.12), hoodMat);
     cape.position.set(0, 1.18, -0.25);
     cape.rotation.x = 0.14;
@@ -1711,6 +1915,8 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     head.position.set(0, 1.72, 0);
     const headMesh = new THREE.Mesh(cachedBox(0.56, 0.56, 0.56), coatMat);
     headMesh.position.y = 0.28;
+    const scarfMask = new THREE.Mesh(cachedBox(0.6, 0.18, 0.6), hoodMat);
+    scarfMask.position.y = 0.14;
     const hat =
       kind === 'swamp_witch'
         ? new THREE.Mesh(cachedBox(0.46, 0.54, 0.46), hoodMat)
@@ -1720,11 +1926,13 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     eyeL.position.set(-0.12, 0.29, 0.29);
     const eyeR = eyeL.clone();
     eyeR.position.x = 0.12;
-    head.add(headMesh, hat, eyeL, eyeR);
+    head.add(headMesh, scarfMask, hat, eyeL, eyeR);
     if (kind === 'swamp_witch') {
       const brim = new THREE.Mesh(cachedBox(0.96, 0.08, 0.96), hoodMat);
       brim.position.y = 0.56;
-      head.add(brim);
+      const hatBand = new THREE.Mesh(cachedBox(0.5, 0.1, 0.5), eyeMat);
+      hatBand.position.y = 0.64;
+      head.add(brim, hatBand);
       const auraGrp = new THREE.Group();
       auraGrp.position.set(0, 1.5, 0);
       const orbA = new THREE.Mesh(cachedBox(0.18, 0.18, 0.18), eyeMat);
@@ -1738,12 +1946,16 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
 
     leftArm = new THREE.Group();
     leftArm.position.set(-0.5, 1.62, 0);
+    const lPad = new THREE.Mesh(cachedBox(0.32, 0.2, 0.34), hoodMat);
+    lPad.position.y = -0.02;
     const lArmM = new THREE.Mesh(cachedBox(0.24, 0.72, 0.24), coatMat);
     lArmM.position.y = -0.36;
-    leftArm.add(lArmM);
+    const lBracer = new THREE.Mesh(cachedBox(0.26, 0.18, 0.26), leatherMat);
+    lBracer.position.y = -0.56;
+    leftArm.add(lPad, lArmM, lBracer);
     rightArm = new THREE.Group();
     rightArm.position.set(0.5, 1.62, 0);
-    rightArm.add(lArmM.clone());
+    rightArm.add(lPad.clone(), lArmM.clone(), lBracer.clone());
     if (kind === 'swamp_witch') {
       const staff = new THREE.Mesh(cachedBox(0.08, 1.65, 0.08), leatherMat);
       staff.position.set(0, -0.45, 0.24);
@@ -1753,9 +1965,11 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     } else {
       const dagger = new THREE.Mesh(cachedBox(0.08, 0.12, 0.68), steelMat);
       dagger.position.set(0, -0.6, 0.34);
-      rightArm.add(dagger);
+      const guard = new THREE.Mesh(cachedBox(0.2, 0.08, 0.08), hoodMat);
+      guard.position.set(0, -0.6, 0.12);
+      rightArm.add(dagger, guard);
       if (kind === 'dune_stalker') {
-        leftArm.add(dagger.clone());
+        leftArm.add(dagger.clone(), guard.clone());
       }
     }
 
@@ -1763,35 +1977,44 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     leftLeg.position.set(-0.2, 0.78, 0);
     const lLegM = new THREE.Mesh(cachedBox(0.28, 0.78, 0.28), leatherMat);
     lLegM.position.y = -0.39;
-    leftLeg.add(lLegM);
+    const lBoot = new THREE.Mesh(cachedBox(0.3, 0.18, 0.34), coatMat);
+    lBoot.position.set(0, -0.68, 0.02);
+    leftLeg.add(lLegM, lBoot);
     rightLeg = new THREE.Group();
     rightLeg.position.set(0.2, 0.78, 0);
-    rightLeg.add(lLegM.clone());
+    rightLeg.add(lLegM.clone(), lBoot.clone());
 
-    body.add(torso, belt, cape, head, leftArm, rightArm, leftLeg, rightLeg);
+    body.add(torso, belt, buckle, sash, pouch, cape, head, leftArm, rightArm, leftLeg, rightLeg);
     hitFlashMeshes.push(torso, headMesh);
   } else if (kind === 'desert_scorpion') {
     const chMat = new THREE.MeshStandardMaterial({ map: textures.scorpionCarapace, roughness: 0.48 });
+    const trimMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.65 });
     const stingMat = new THREE.MeshStandardMaterial({ color: 0xa3e635, emissive: 0x65a30d, emissiveIntensity: 1.4 });
     const eyeMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0xeab308, emissiveIntensity: 1.6 });
 
     const torso = new THREE.Mesh(cachedBox(0.88, 0.44, 1.08), chMat);
     torso.position.y = 0.52;
+    const ridge1 = new THREE.Mesh(cachedBox(0.76, 0.12, 0.28), trimMat);
+    ridge1.position.set(0, 0.78, 0.16);
+    const ridge2 = ridge1.clone();
+    ridge2.position.z = -0.26;
 
     head = new THREE.Group();
     head.position.set(0, 0.56, 0.58);
+    const helm = new THREE.Mesh(cachedBox(0.56, 0.24, 0.26), trimMat);
+    helm.position.set(0, 0.08, -0.02);
     const eyeL = new THREE.Mesh(cachedBox(0.1, 0.08, 0.06), eyeMat);
-    eyeL.position.set(-0.18, 0.08, 0.04);
+    eyeL.position.set(-0.18, 0.08, 0.08);
     const eyeR = eyeL.clone();
     eyeR.position.x = 0.18;
-    head.add(eyeL, eyeR);
+    head.add(helm, eyeL, eyeR);
 
     tail = new THREE.Group();
     tail.position.set(0, 0.65, -0.54);
     const seg1 = new THREE.Mesh(cachedBox(0.24, 0.52, 0.24), chMat);
     seg1.position.set(0, 0.24, -0.06);
     seg1.rotation.x = 0.28;
-    const seg2 = new THREE.Mesh(cachedBox(0.2, 0.54, 0.2), chMat);
+    const seg2 = new THREE.Mesh(cachedBox(0.2, 0.54, 0.2), trimMat);
     seg2.position.set(0, 0.66, 0.08);
     seg2.rotation.x = 0.82;
     const stinger = new THREE.Mesh(cachedBox(0.16, 0.16, 0.34), stingMat);
@@ -1802,14 +2025,18 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     leftArm.position.set(-0.48, 0.56, 0.52);
     const pArmL = new THREE.Mesh(cachedBox(0.18, 0.16, 0.44), chMat);
     pArmL.position.z = 0.22;
-    const pClawL = new THREE.Mesh(cachedBox(0.32, 0.24, 0.38), chMat);
+    const pClawL = new THREE.Mesh(cachedBox(0.32, 0.24, 0.38), trimMat);
     pClawL.position.set(-0.04, 0.02, 0.54);
-    leftArm.add(pArmL, pClawL);
+    const pincerTipL = new THREE.Mesh(cachedBox(0.12, 0.14, 0.2), eyeMat);
+    pincerTipL.position.set(-0.04, 0.02, 0.78);
+    leftArm.add(pArmL, pClawL, pincerTipL);
     rightArm = new THREE.Group();
     rightArm.position.set(0.48, 0.56, 0.52);
     const pClawR = pClawL.clone();
     pClawR.position.x = 0.04;
-    rightArm.add(pArmL.clone(), pClawR);
+    const pincerTipR = pincerTipL.clone();
+    pincerTipR.position.x = 0.04;
+    rightArm.add(pArmL.clone(), pClawR, pincerTipR);
 
     const makeScorpLeg = (x: number, z: number) => {
       const lg = new THREE.Group();
@@ -1817,7 +2044,9 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
       const m = new THREE.Mesh(cachedBox(0.44, 0.12, 0.12), chMat);
       m.position.x = Math.sign(x) * 0.22;
       m.rotation.z = Math.sign(x) * -0.3;
-      lg.add(m);
+      const tip = new THREE.Mesh(cachedBox(0.12, 0.14, 0.12), trimMat);
+      tip.position.set(Math.sign(x) * 0.42, -0.08, 0);
+      lg.add(m, tip);
       return lg;
     };
     legFL = makeScorpLeg(-0.44, 0.36);
@@ -1827,48 +2056,63 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     legBL = makeScorpLeg(-0.44, -0.36);
     legBR = makeScorpLeg(0.44, -0.36);
     extraLimbs = [legML, legMR];
-    body.add(torso, head, tail, leftArm, rightArm, legFL, legFR, legML, legMR, legBL, legBR);
+    body.add(torso, ridge1, ridge2, head, tail, leftArm, rightArm, legFL, legFR, legML, legMR, legBL, legBR);
     hitFlashMeshes.push(torso, seg1, seg2);
   } else if (kind === 'sand_mummy') {
     const wrapMat = new THREE.MeshStandardMaterial({ map: textures.mummyWrap, roughness: 0.88 });
     const goldMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, metalness: 0.78, roughness: 0.28 });
+    const lapisMat = new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.55 });
     const eyeMat = new THREE.MeshStandardMaterial({ color: 0xfde047, emissive: 0xd97706, emissiveIntensity: 1.7 });
 
     const torso = new THREE.Mesh(cachedBox(0.74, 0.92, 0.42), wrapMat);
     torso.position.y = 1.24;
-    const collar = new THREE.Mesh(cachedBox(0.8, 0.14, 0.48), goldMat);
+    const collar = new THREE.Mesh(cachedBox(0.82, 0.16, 0.5), goldMat);
     collar.position.y = 1.64;
+    const chestScarab = new THREE.Mesh(cachedBox(0.24, 0.24, 0.1), lapisMat);
+    chestScarab.position.set(0, 1.38, 0.22);
+    const belt = new THREE.Mesh(cachedBox(0.8, 0.14, 0.48), lapisMat);
+    belt.position.y = 0.88;
 
     head = new THREE.Group();
     head.position.set(0, 1.74, 0);
     const headMesh = new THREE.Mesh(cachedBox(0.58, 0.58, 0.58), wrapMat);
     headMesh.position.y = 0.29;
-    const crown = new THREE.Mesh(cachedBox(0.62, 0.12, 0.62), goldMat);
+    const crown = new THREE.Mesh(cachedBox(0.64, 0.14, 0.64), goldMat);
     crown.position.y = 0.52;
+    const uraeus = new THREE.Mesh(cachedBox(0.12, 0.24, 0.12), eyeMat);
+    uraeus.position.set(0, 0.64, 0.28);
+    const nemesL = new THREE.Mesh(cachedBox(0.12, 0.46, 0.36), lapisMat);
+    nemesL.position.set(-0.34, 0.26, -0.06);
+    const nemesR = nemesL.clone();
+    nemesR.position.x = 0.34;
     const eyeL = new THREE.Mesh(cachedBox(0.11, 0.08, 0.06), eyeMat);
     eyeL.position.set(-0.13, 0.3, 0.3);
     const eyeR = eyeL.clone();
     eyeR.position.x = 0.13;
-    head.add(headMesh, crown, eyeL, eyeR);
+    head.add(headMesh, crown, uraeus, nemesL, nemesR, eyeL, eyeR);
 
     leftArm = new THREE.Group();
     leftArm.position.set(-0.48, 1.56, 0);
     const lArmM = new THREE.Mesh(cachedBox(0.22, 0.22, 0.72), wrapMat);
     lArmM.position.set(0, -0.06, 0.32);
-    leftArm.add(lArmM);
+    const lBangle = new THREE.Mesh(cachedBox(0.26, 0.26, 0.14), goldMat);
+    lBangle.position.set(0, -0.06, 0.52);
+    leftArm.add(lArmM, lBangle);
     rightArm = new THREE.Group();
     rightArm.position.set(0.48, 1.56, 0);
-    rightArm.add(lArmM.clone());
+    rightArm.add(lArmM.clone(), lBangle.clone());
 
     leftLeg = new THREE.Group();
     leftLeg.position.set(-0.2, 0.76, 0);
     const lLegM = new THREE.Mesh(cachedBox(0.26, 0.76, 0.26), wrapMat);
     lLegM.position.y = -0.38;
-    leftLeg.add(lLegM);
+    const lAnklet = new THREE.Mesh(cachedBox(0.3, 0.14, 0.3), goldMat);
+    lAnklet.position.y = -0.64;
+    leftLeg.add(lLegM, lAnklet);
     rightLeg = new THREE.Group();
     rightLeg.position.set(0.2, 0.76, 0);
-    rightLeg.add(lLegM.clone());
-    body.add(torso, collar, head, leftArm, rightArm, leftLeg, rightLeg);
+    rightLeg.add(lLegM.clone(), lAnklet.clone());
+    body.add(torso, collar, chestScarab, belt, head, leftArm, rightArm, leftLeg, rightLeg);
     hitFlashMeshes.push(torso, headMesh);
   } else if (kind === 'sand_colossus' || kind === 'frost_yeti' || kind === 'crystal_golem') {
     const texMap =
@@ -1881,18 +2125,27 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
       kind === 'sand_colossus' ? 0xf59e0b : kind === 'frost_yeti' ? 0xffffff : 0x67e8f9;
     const coreHex =
       kind === 'sand_colossus' ? 0xfacc15 : kind === 'frost_yeti' ? 0x38bdf8 : 0xe879f9;
+    const trimHex =
+      kind === 'sand_colossus' ? 0x92400e : kind === 'frost_yeti' ? 0x94a3b8 : 0x1e1b4b;
     const mainMat = new THREE.MeshStandardMaterial({
       map: texMap,
       color: bodyHex,
       roughness: kind === 'crystal_golem' ? 0.25 : 0.82,
       metalness: kind === 'crystal_golem' ? 0.6 : 0.1,
     });
+    const trimMat = new THREE.MeshStandardMaterial({ color: trimHex, roughness: 0.6, metalness: 0.35 });
     const coreMat = new THREE.MeshStandardMaterial({ color: coreHex, emissive: coreHex, emissiveIntensity: 1.65 });
 
     const torso = new THREE.Mesh(cachedBox(1.48, 1.38, 0.92), mainMat);
     torso.position.y = 1.78;
+    const beltBand = new THREE.Mesh(cachedBox(1.56, 0.22, 0.98), trimMat);
+    beltBand.position.y = 1.24;
     const core = new THREE.Mesh(cachedBox(0.42, 0.42, 0.16), coreMat);
     core.position.set(0, 1.82, 0.48);
+    const backSpire1 = new THREE.Mesh(cachedBox(0.28, 0.56, 0.28), coreMat);
+    backSpire1.position.set(-0.34, 2.38, -0.34);
+    const backSpire2 = backSpire1.clone();
+    backSpire2.position.x = 0.34;
 
     if (kind === 'crystal_golem') {
       const auraGrp = new THREE.Group();
@@ -1911,42 +2164,51 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     head.position.set(0, 2.52, 0);
     const headMesh = new THREE.Mesh(cachedBox(0.82, 0.76, 0.8), mainMat);
     headMesh.position.y = 0.38;
+    const brow = new THREE.Mesh(cachedBox(0.88, 0.16, 0.86), trimMat);
+    brow.position.y = 0.62;
     const eyeL = new THREE.Mesh(cachedBox(0.16, 0.12, 0.08), coreMat);
     eyeL.position.set(-0.18, 0.38, 0.41);
     const eyeR = eyeL.clone();
     eyeR.position.x = 0.18;
-    head.add(headMesh, eyeL, eyeR);
+    head.add(headMesh, brow, eyeL, eyeR);
     if (kind === 'frost_yeti') {
-      const hornL = new THREE.Mesh(cachedBox(0.16, 0.38, 0.16), coreMat);
-      hornL.position.set(-0.42, 0.72, 0);
+      const hornL = new THREE.Mesh(cachedBox(0.16, 0.42, 0.16), coreMat);
+      hornL.position.set(-0.42, 0.74, 0);
       hornL.rotation.z = 0.45;
       const hornR = hornL.clone();
       hornR.position.x = 0.42;
       hornR.rotation.z = -0.45;
       head.add(hornL, hornR);
+    } else {
+      const crest = new THREE.Mesh(cachedBox(0.24, 0.36, 0.24), coreMat);
+      crest.position.y = 0.88;
+      head.add(crest);
     }
 
     leftArm = new THREE.Group();
     leftArm.position.set(-1.02, 2.3, 0);
+    const lShoulder = new THREE.Mesh(cachedBox(0.62, 0.42, 0.62), trimMat);
     const lArmM = new THREE.Mesh(cachedBox(0.48, 1.26, 0.48), mainMat);
     lArmM.position.y = -0.63;
-    const lFistBand = new THREE.Mesh(cachedBox(0.52, 0.16, 0.52), coreMat);
+    const lFistBand = new THREE.Mesh(cachedBox(0.54, 0.18, 0.54), coreMat);
     lFistBand.position.y = -1.04;
-    leftArm.add(lArmM, lFistBand);
+    leftArm.add(lShoulder, lArmM, lFistBand);
     rightArm = new THREE.Group();
     rightArm.position.set(1.02, 2.3, 0);
-    rightArm.add(lArmM.clone(), lFistBand.clone());
+    rightArm.add(lShoulder.clone(), lArmM.clone(), lFistBand.clone());
 
     leftLeg = new THREE.Group();
     leftLeg.position.set(-0.42, 1.08, 0);
     const lLegM = new THREE.Mesh(cachedBox(0.52, 1.08, 0.52), mainMat);
     lLegM.position.y = -0.54;
-    leftLeg.add(lLegM);
+    const lGreave = new THREE.Mesh(cachedBox(0.56, 0.24, 0.56), trimMat);
+    lGreave.position.y = -0.84;
+    leftLeg.add(lLegM, lGreave);
     rightLeg = new THREE.Group();
     rightLeg.position.set(0.42, 1.08, 0);
-    rightLeg.add(lLegM.clone());
+    rightLeg.add(lLegM.clone(), lGreave.clone());
 
-    body.add(torso, core, head, leftArm, rightArm, leftLeg, rightLeg);
+    body.add(torso, beltBand, core, backSpire1, backSpire2, head, leftArm, rightArm, leftLeg, rightLeg);
     hitFlashMeshes.push(torso, headMesh, lArmM);
   } else if (kind === 'ice_wraith') {
     const iceMat = new THREE.MeshStandardMaterial({
@@ -1958,85 +2220,128 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
       opacity: 0.9,
     });
     const coreMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0ea5e9, emissiveIntensity: 1.8 });
+    const darkIceMat = new THREE.MeshStandardMaterial({ color: 0x0c4a6e, roughness: 0.35, metalness: 0.45 });
     const robe = new THREE.Mesh(cachedBox(0.86, 1.56, 0.62), iceMat);
     robe.position.y = 1.48;
+    const sash = new THREE.Mesh(cachedBox(0.92, 0.16, 0.68), darkIceMat);
+    sash.position.y = 1.24;
     const frostCore = new THREE.Mesh(cachedBox(0.36, 0.36, 0.16), coreMat);
     frostCore.position.set(0, 1.72, 0.28);
+
+    const auraGrp = new THREE.Group();
+    auraGrp.position.set(0, 1.85, 0);
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2;
+      const icicle = new THREE.Mesh(cachedBox(0.14, 0.34, 0.14), coreMat);
+      icicle.position.set(Math.cos(a) * 0.92, 0, Math.sin(a) * 0.92);
+      auraGrp.add(icicle);
+    }
+    aura = auraGrp;
 
     head = new THREE.Group();
     head.position.set(0, 2.26, 0);
     const headMesh = new THREE.Mesh(cachedBox(0.58, 0.62, 0.58), iceMat);
     headMesh.position.y = 0.31;
-    const crown = new THREE.Mesh(cachedBox(0.28, 0.32, 0.28), coreMat);
-    crown.position.y = 0.72;
+    const crownRim = new THREE.Mesh(cachedBox(0.64, 0.12, 0.64), darkIceMat);
+    crownRim.position.y = 0.56;
+    const crown = new THREE.Mesh(cachedBox(0.28, 0.34, 0.28), coreMat);
+    crown.position.y = 0.74;
     const eyeL = new THREE.Mesh(cachedBox(0.11, 0.08, 0.06), coreMat);
     eyeL.position.set(-0.13, 0.32, 0.3);
     const eyeR = eyeL.clone();
     eyeR.position.x = 0.13;
-    head.add(headMesh, crown, eyeL, eyeR);
+    head.add(headMesh, crownRim, crown, eyeL, eyeR);
 
     wingL = new THREE.Group();
     wingL.position.set(-0.44, 1.9, -0.15);
     const wShardL = new THREE.Mesh(cachedBox(0.76, 0.56, 0.08), iceMat);
     wShardL.position.set(-0.38, 0.1, 0);
-    wingL.add(wShardL);
+    const wTipL = new THREE.Mesh(cachedBox(0.28, 0.34, 0.1), coreMat);
+    wTipL.position.set(-0.78, 0.24, 0);
+    wingL.add(wShardL, wTipL);
     wingR = new THREE.Group();
     wingR.position.set(0.44, 1.9, -0.15);
     const wShardR = wShardL.clone();
     wShardR.position.x = 0.38;
-    wingR.add(wShardR);
+    const wTipR = wTipL.clone();
+    wTipR.position.x = 0.78;
+    wingR.add(wShardR, wTipR);
 
     leftArm = new THREE.Group();
     leftArm.position.set(-0.58, 1.98, 0);
     const shard = new THREE.Mesh(cachedBox(0.2, 0.72, 0.2), iceMat);
     shard.position.y = -0.34;
-    leftArm.add(shard);
+    const cuff = new THREE.Mesh(cachedBox(0.26, 0.14, 0.26), coreMat);
+    cuff.position.y = -0.58;
+    leftArm.add(shard, cuff);
     rightArm = new THREE.Group();
     rightArm.position.set(0.58, 1.98, 0);
-    rightArm.add(shard.clone());
-    body.add(robe, frostCore, head, wingL, wingR, leftArm, rightArm);
+    rightArm.add(shard.clone(), cuff.clone());
+    body.add(robe, sash, frostCore, auraGrp, head, wingL, wingR, leftArm, rightArm);
     hitFlashMeshes.push(robe, headMesh);
   } else if (kind === 'void_bat') {
     const batMat = new THREE.MeshStandardMaterial({ map: textures.banditCloth, color: 0x4c1d95, roughness: 0.65 });
     const membraneMat = new THREE.MeshStandardMaterial({ color: 0x2e1065, roughness: 0.6, side: THREE.DoubleSide });
+    const neonMat = new THREE.MeshStandardMaterial({ color: 0xc084fc, emissive: 0xa855f7, emissiveIntensity: 1.5 });
     const eyeMat = new THREE.MeshStandardMaterial({ color: 0xf43f5e, emissive: 0xe11d48, emissiveIntensity: 1.8 });
 
     const torso = new THREE.Mesh(cachedBox(0.62, 0.72, 0.58), batMat);
     torso.position.y = 1.65;
+    const chestRune = new THREE.Mesh(cachedBox(0.24, 0.26, 0.12), neonMat);
+    chestRune.position.set(0, 1.66, 0.3);
 
     head = new THREE.Group();
     head.position.set(0, 1.88, 0.16);
-    const earL = new THREE.Mesh(cachedBox(0.14, 0.26, 0.1), batMat);
+    const earL = new THREE.Mesh(cachedBox(0.14, 0.28, 0.1), batMat);
     earL.position.set(-0.18, 0.28, 0);
     const earR = earL.clone();
     earR.position.x = 0.18;
+    const fangL = new THREE.Mesh(cachedBox(0.06, 0.12, 0.06), neonMat);
+    fangL.position.set(-0.1, -0.14, 0.22);
+    const fangR = fangL.clone();
+    fangR.position.x = 0.1;
     const eyeL = new THREE.Mesh(cachedBox(0.1, 0.08, 0.06), eyeMat);
     eyeL.position.set(-0.12, -0.02, 0.22);
     const eyeR = eyeL.clone();
     eyeR.position.x = 0.12;
-    head.add(earL, earR, eyeL, eyeR);
+    head.add(earL, earR, fangL, fangR, eyeL, eyeR);
 
     wingL = new THREE.Group();
     wingL.position.set(-0.32, 1.72, 0);
     const wMemL = new THREE.Mesh(cachedBox(0.96, 0.48, 0.06), membraneMat);
     wMemL.position.set(-0.48, 0, -0.08);
-    wingL.add(wMemL);
+    const wEdgeL = new THREE.Mesh(cachedBox(0.98, 0.1, 0.09), neonMat);
+    wEdgeL.position.set(-0.48, 0.24, -0.06);
+    wingL.add(wMemL, wEdgeL);
 
     wingR = new THREE.Group();
     wingR.position.set(0.32, 1.72, 0);
     const wMemR = wMemL.clone();
     wMemR.position.x = 0.48;
-    wingR.add(wMemR);
+    const wEdgeR = wEdgeL.clone();
+    wEdgeR.position.x = 0.48;
+    wingR.add(wMemR, wEdgeR);
 
-    body.add(torso, head, wingL, wingR);
+    tail = new THREE.Group();
+    tail.position.set(0, 1.42, -0.28);
+    const vTail = new THREE.Mesh(cachedBox(0.1, 0.1, 0.42), batMat);
+    vTail.position.set(0, 0.04, -0.2);
+    const vTip = new THREE.Mesh(cachedBox(0.18, 0.18, 0.14), neonMat);
+    vTip.position.set(0, 0.06, -0.42);
+    tail.add(vTail, vTip);
+
+    body.add(torso, chestRune, head, wingL, wingR, tail);
     hitFlashMeshes.push(torso, wMemL, wMemR);
   } else if (kind === 'magma_hound') {
     const obsMat = new THREE.MeshStandardMaterial({ map: textures.magmaCrust, roughness: 0.8 });
     const lavaMat = new THREE.MeshStandardMaterial({ color: 0xf97316, emissive: 0xea580c, emissiveIntensity: 1.75 });
+    const collarMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.82, roughness: 0.28 });
     const torso = new THREE.Mesh(cachedBox(0.72, 0.64, 1.24), obsMat);
     torso.position.y = 0.85;
     const spine = new THREE.Mesh(cachedBox(0.22, 0.2, 1.02), lavaMat);
     spine.position.y = 1.22;
+    const collar = new THREE.Mesh(cachedBox(0.78, 0.2, 0.22), collarMat);
+    collar.position.set(0, 0.92, 0.48);
 
     head = new THREE.Group();
     head.position.set(0, 1.0, 0.66);
@@ -2044,6 +2349,8 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     headMesh.position.set(0, 0, 0.16);
     const snout = new THREE.Mesh(cachedBox(0.3, 0.22, 0.34), obsMat);
     snout.position.set(0, -0.08, 0.44);
+    const jawGlow = new THREE.Mesh(cachedBox(0.24, 0.08, 0.24), lavaMat);
+    jawGlow.position.set(0, -0.2, 0.42);
     const hornL = new THREE.Mesh(cachedBox(0.12, 0.28, 0.12), lavaMat);
     hornL.position.set(-0.2, 0.34, 0.04);
     const hornR = hornL.clone();
@@ -2052,7 +2359,7 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     eyeL.position.set(-0.15, 0.08, 0.44);
     const eyeR = eyeL.clone();
     eyeR.position.x = 0.15;
-    head.add(headMesh, snout, hornL, hornR, eyeL, eyeR);
+    head.add(headMesh, snout, jawGlow, hornL, hornR, eyeL, eyeR);
 
     tail = new THREE.Group();
     tail.position.set(0, 0.96, -0.66);
@@ -2064,36 +2371,45 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     const makeLeg = (x: number, z: number) => {
       const lg = new THREE.Group();
       lg.position.set(x, 0.54, z);
-      const m = new THREE.Mesh(cachedBox(0.2, 0.54, 0.2), obsMat);
-      m.position.y = -0.27;
-      lg.add(m);
+      const m = new THREE.Mesh(cachedBox(0.2, 0.42, 0.2), obsMat);
+      m.position.y = -0.21;
+      const paw = new THREE.Mesh(cachedBox(0.22, 0.14, 0.24), lavaMat);
+      paw.position.y = -0.47;
+      lg.add(m, paw);
       return lg;
     };
     legFL = makeLeg(-0.28, 0.48);
     legFR = makeLeg(0.28, 0.48);
     legBL = makeLeg(-0.28, -0.48);
     legBR = makeLeg(0.28, -0.48);
-    body.add(torso, spine, head, tail, legFL, legFR, legBL, legBR);
+    body.add(torso, spine, collar, head, tail, legFL, legFR, legBL, legBR);
     hitFlashMeshes.push(torso, headMesh);
   } else if (kind === 'lava_imp') {
     const skinMat = new THREE.MeshStandardMaterial({ map: textures.magmaCrust, color: 0xf87171, roughness: 0.65 });
+    const obsMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.72, metalness: 0.35 });
     const flameMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0xf97316, emissiveIntensity: 1.75 });
     const torso = new THREE.Mesh(cachedBox(0.64, 0.78, 0.42), skinMat);
     torso.position.y = 1.12;
+    const belt = new THREE.Mesh(cachedBox(0.7, 0.14, 0.48), obsMat);
+    belt.position.y = 0.84;
+    const chestCore = new THREE.Mesh(cachedBox(0.22, 0.22, 0.1), flameMat);
+    chestCore.position.set(0, 1.24, 0.22);
 
     head = new THREE.Group();
     head.position.set(0, 1.54, 0);
     const headMesh = new THREE.Mesh(cachedBox(0.52, 0.52, 0.52), skinMat);
     headMesh.position.y = 0.28;
-    const hornL = new THREE.Mesh(cachedBox(0.12, 0.28, 0.12), flameMat);
-    hornL.position.set(-0.18, 0.62, 0);
+    const brow = new THREE.Mesh(cachedBox(0.56, 0.1, 0.56), obsMat);
+    brow.position.y = 0.44;
+    const hornL = new THREE.Mesh(cachedBox(0.12, 0.32, 0.12), flameMat);
+    hornL.position.set(-0.18, 0.64, 0);
     const hornR = hornL.clone();
     hornR.position.x = 0.18;
     const eyeL = new THREE.Mesh(cachedBox(0.1, 0.08, 0.06), flameMat);
     eyeL.position.set(-0.12, 0.3, 0.27);
     const eyeR = eyeL.clone();
     eyeR.position.x = 0.12;
-    head.add(headMesh, hornL, hornR, eyeL, eyeR);
+    head.add(headMesh, brow, hornL, hornR, eyeL, eyeR);
 
     wingL = new THREE.Group();
     wingL.position.set(-0.26, 1.38, -0.22);
@@ -2106,27 +2422,39 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     impWingR.position.x = 0.28;
     wingR.add(impWingR);
 
+    tail = new THREE.Group();
+    tail.position.set(0, 0.86, -0.22);
+    const impTail = new THREE.Mesh(cachedBox(0.1, 0.1, 0.54), obsMat);
+    impTail.position.set(0, 0.08, -0.24);
+    const impSpade = new THREE.Mesh(cachedBox(0.22, 0.22, 0.14), flameMat);
+    impSpade.position.set(0, 0.12, -0.52);
+    tail.add(impTail, impSpade);
+
     leftArm = new THREE.Group();
     leftArm.position.set(-0.44, 1.44, 0);
     const lArmM = new THREE.Mesh(cachedBox(0.2, 0.62, 0.2), skinMat);
     lArmM.position.y = -0.31;
-    leftArm.add(lArmM);
+    const lBrace = new THREE.Mesh(cachedBox(0.24, 0.14, 0.24), obsMat);
+    lBrace.position.y = -0.46;
+    leftArm.add(lArmM, lBrace);
     rightArm = new THREE.Group();
     rightArm.position.set(0.44, 1.44, 0);
     const rArmM = lArmM.clone();
     const fireOrb = new THREE.Mesh(cachedBox(0.24, 0.24, 0.24), flameMat);
     fireOrb.position.set(0, -0.62, 0.14);
-    rightArm.add(rArmM, fireOrb);
+    rightArm.add(rArmM, lBrace.clone(), fireOrb);
 
     leftLeg = new THREE.Group();
     leftLeg.position.set(-0.18, 0.72, 0);
     const lLegM = new THREE.Mesh(cachedBox(0.22, 0.72, 0.22), skinMat);
     lLegM.position.y = -0.36;
-    leftLeg.add(lLegM);
+    const lHoof = new THREE.Mesh(cachedBox(0.24, 0.16, 0.26), obsMat);
+    lHoof.position.y = -0.64;
+    leftLeg.add(lLegM, lHoof);
     rightLeg = new THREE.Group();
     rightLeg.position.set(0.18, 0.72, 0);
-    rightLeg.add(lLegM.clone());
-    body.add(torso, head, wingL, wingR, leftArm, rightArm, leftLeg, rightLeg);
+    rightLeg.add(lLegM.clone(), lHoof.clone());
+    body.add(torso, belt, chestCore, head, wingL, wingR, tail, leftArm, rightArm, leftLeg, rightLeg);
     hitFlashMeshes.push(torso, headMesh);
   } else if (kind === 'cursed_knight') {
     const armorMat = new THREE.MeshStandardMaterial({ map: textures.cursedArmor, metalness: 0.84, roughness: 0.24 });
@@ -2135,6 +2463,8 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
 
     const torso = new THREE.Mesh(cachedBox(1.02, 1.14, 0.62), armorMat);
     torso.position.y = 1.56;
+    const beltTrim = new THREE.Mesh(cachedBox(1.08, 0.18, 0.68), glowMat);
+    beltTrim.position.y = 1.12;
     const core = new THREE.Mesh(cachedBox(0.32, 0.32, 0.14), glowMat);
     core.position.set(0, 1.65, 0.33);
     const cape = new THREE.Mesh(new THREE.PlaneGeometry(1.05, 1.48), capeMat);
@@ -2157,23 +2487,26 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     headMesh.position.y = 0.34;
     const visor = new THREE.Mesh(cachedBox(0.54, 0.14, 0.1), glowMat);
     visor.position.set(0, 0.34, 0.35);
+    const crest = new THREE.Mesh(cachedBox(0.16, 0.22, 0.58), glowMat);
+    crest.position.set(0, 0.74, -0.02);
     const hornL = new THREE.Mesh(cachedBox(0.14, 0.44, 0.14), glowMat);
     hornL.position.set(-0.3, 0.78, 0);
     hornL.rotation.z = 0.3;
     const hornR = hornL.clone();
     hornR.position.x = 0.3;
     hornR.rotation.z = -0.3;
-    head.add(headMesh, visor, hornL, hornR);
+    head.add(headMesh, visor, crest, hornL, hornR);
 
     leftArm = new THREE.Group();
     leftArm.position.set(-0.72, 2.04, 0);
+    const lPauldron = new THREE.Mesh(cachedBox(0.44, 0.3, 0.46), armorMat);
     const lArmM = new THREE.Mesh(cachedBox(0.32, 0.92, 0.32), armorMat);
     lArmM.position.y = -0.46;
     const kiteShield = new THREE.Mesh(cachedBox(0.12, 0.88, 0.62), armorMat);
     kiteShield.position.set(-0.18, -0.52, 0.18);
     const shieldRune = new THREE.Mesh(cachedBox(0.14, 0.34, 0.18), glowMat);
     shieldRune.position.set(-0.18, -0.52, 0.18);
-    leftArm.add(lArmM, kiteShield, shieldRune);
+    leftArm.add(lPauldron, lArmM, kiteShield, shieldRune);
 
     rightArm = new THREE.Group();
     rightArm.position.set(0.72, 2.04, 0);
@@ -2182,17 +2515,19 @@ export function buildMobModel(kind: MobKind, textures: ProceduralTextures): MobV
     sword.position.set(0, -0.82, 0.62);
     const swordEdge = new THREE.Mesh(cachedBox(0.18, 0.08, 1.12), glowMat);
     swordEdge.position.set(0, -0.82, 0.62);
-    rightArm.add(rArmM, sword, swordEdge);
+    rightArm.add(lPauldron.clone(), rArmM, sword, swordEdge);
 
     leftLeg = new THREE.Group();
     leftLeg.position.set(-0.28, 1.0, 0);
     const lLegM = new THREE.Mesh(cachedBox(0.36, 1.0, 0.36), armorMat);
     lLegM.position.y = -0.5;
-    leftLeg.add(lLegM);
+    const lGreave = new THREE.Mesh(cachedBox(0.4, 0.18, 0.4), glowMat);
+    lGreave.position.y = -0.55;
+    leftLeg.add(lLegM, lGreave);
     rightLeg = new THREE.Group();
     rightLeg.position.set(0.28, 1.0, 0);
-    rightLeg.add(lLegM.clone());
-    body.add(torso, core, cape, auraGrp, head, leftArm, rightArm, leftLeg, rightLeg);
+    rightLeg.add(lLegM.clone(), lGreave.clone());
+    body.add(torso, beltTrim, core, cape, auraGrp, head, leftArm, rightArm, leftLeg, rightLeg);
     hitFlashMeshes.push(torso, headMesh);
   }
 
@@ -2296,6 +2631,7 @@ export interface PeacefulMobVisual {
   legFR?: THREE.Group;
   legBL?: THREE.Group;
   legBR?: THREE.Group;
+  tail?: THREE.Group;
   hpBarBg?: THREE.Mesh;
   hpBarFill?: THREE.Mesh;
   hitFlashMeshes?: THREE.Mesh[];
@@ -2318,21 +2654,33 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
   let legFR: THREE.Group | undefined;
   let legBL: THREE.Group | undefined;
   let legBR: THREE.Group | undefined;
+  let tail: THREE.Group | undefined;
 
   if (kind === 'deer') {
     const coatMat = new THREE.MeshStandardMaterial({ map: textures.deerCoat, roughness: 0.8 });
     const bellyMat = new THREE.MeshStandardMaterial({ color: 0xf5e8d3, roughness: 0.85 });
     const hoofMat = new THREE.MeshStandardMaterial({ color: 0x292524, roughness: 0.75 });
     const antlerMat = new THREE.MeshStandardMaterial({ color: 0xe7d6b9, roughness: 0.65 });
+    const leatherMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.82 });
     const noseMat = new THREE.MeshStandardMaterial({ color: 0x1c1917, roughness: 0.45 });
 
     const torso = new THREE.Mesh(cachedBox(0.64, 0.62, 1.18), coatMat);
     torso.position.y = 1.05;
     const belly = new THREE.Mesh(cachedBox(0.56, 0.16, 1.06), bellyMat);
     belly.position.set(0, 0.72, 0);
-    const tail = new THREE.Mesh(cachedBox(0.14, 0.22, 0.14), bellyMat);
+    const spotL = new THREE.Mesh(cachedBox(0.06, 0.12, 0.16), bellyMat);
+    spotL.position.set(-0.33, 1.16, -0.18);
+    const spotR = spotL.clone();
+    spotR.position.set(0.33, 1.12, 0.12);
+    const collar = new THREE.Mesh(cachedBox(0.34, 0.12, 0.34), leatherMat);
+    collar.position.set(0, 1.38, 0.52);
+
+    tail = new THREE.Group();
     tail.position.set(0, 1.18, -0.62);
-    tail.rotation.x = -0.45;
+    const tailM = new THREE.Mesh(cachedBox(0.14, 0.24, 0.14), bellyMat);
+    tailM.position.set(0, 0.06, -0.06);
+    tailM.rotation.x = -0.45;
+    tail.add(tailM);
 
     head = new THREE.Group();
     head.position.set(0, 1.32, 0.52);
@@ -2357,11 +2705,11 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     earR.rotation.z = -0.4;
 
     for (const side of [-1, 1]) {
-      const stem = new THREE.Mesh(cachedBox(0.06, 0.42, 0.06), antlerMat);
-      stem.position.set(side * 0.12, 0.84, 0.18);
+      const stem = new THREE.Mesh(cachedBox(0.06, 0.46, 0.06), antlerMat);
+      stem.position.set(side * 0.12, 0.86, 0.18);
       stem.rotation.z = -side * 0.24;
-      const fork = new THREE.Mesh(cachedBox(0.05, 0.22, 0.05), antlerMat);
-      fork.position.set(side * 0.2, 0.9, 0.24);
+      const fork = new THREE.Mesh(cachedBox(0.05, 0.24, 0.05), antlerMat);
+      fork.position.set(side * 0.22, 0.94, 0.24);
       fork.rotation.z = -side * 0.55;
       head.add(stem, fork);
     }
@@ -2382,7 +2730,7 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     legBL = makeLeg(-0.2, -0.42);
     legBR = makeLeg(0.2, -0.42);
 
-    body.add(torso, belly, tail, head, legFL, legFR, legBL, legBR);
+    body.add(torso, belly, spotL, spotR, collar, tail, head, legFL, legFR, legBL, legBR);
     hitFlashMeshes.push(torso, skull);
     hpBarBg = new THREE.Mesh(
       new THREE.PlaneGeometry(1.05, 0.14),
@@ -2400,12 +2748,22 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
   } else if (kind === 'sheep') {
     const woolMat = new THREE.MeshStandardMaterial({ map: textures.sheepWool, roughness: 0.95 });
     const skinMat = new THREE.MeshStandardMaterial({ color: 0x3f3a36, roughness: 0.8 });
+    const ribbonMat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.72 });
+    const bellMat = new THREE.MeshStandardMaterial({ color: 0xfbbf24, metalness: 0.85, roughness: 0.25 });
     const eyeMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.35 });
 
     const fleece = new THREE.Mesh(cachedBox(0.86, 0.74, 1.06), woolMat);
     fleece.position.y = 0.84;
+    const collar = new THREE.Mesh(cachedBox(0.56, 0.12, 0.18), ribbonMat);
+    collar.position.set(0, 0.92, 0.5);
+    const bell = new THREE.Mesh(cachedBox(0.14, 0.16, 0.14), bellMat);
+    bell.position.set(0, 0.76, 0.58);
+
+    tail = new THREE.Group();
+    tail.position.set(0, 0.92, -0.58);
     const tailPuff = new THREE.Mesh(cachedBox(0.24, 0.24, 0.18), woolMat);
-    tailPuff.position.set(0, 0.92, -0.58);
+    tailPuff.position.z = -0.06;
+    tail.add(tailPuff);
 
     head = new THREE.Group();
     head.position.set(0, 0.96, 0.52);
@@ -2436,7 +2794,7 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     legBL = makeLeg(-0.22, -0.32);
     legBR = makeLeg(0.22, -0.32);
 
-    body.add(fleece, tailPuff, head, legFL, legFR, legBL, legBR);
+    body.add(fleece, collar, bell, tail, head, legFL, legFR, legBL, legBR);
     hitFlashMeshes.push(fleece, skull);
     hpBarBg = new THREE.Mesh(
       new THREE.PlaneGeometry(1.0, 0.14),
@@ -2464,17 +2822,23 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     torso.position.y = 1.42;
     const apron = new THREE.Mesh(cachedBox(0.58, 0.74, 0.06), apronMat);
     apron.position.set(0, 1.3, 0.26);
+    const sash = new THREE.Mesh(cachedBox(0.88, 0.12, 0.52), hatMat);
+    sash.position.y = 1.06;
     const pouch = new THREE.Mesh(cachedBox(0.22, 0.24, 0.18), goldMat);
     pouch.position.set(0.38, 1.02, 0.22);
+    const ledgerPack = new THREE.Mesh(cachedBox(0.48, 0.52, 0.24), hatMat);
+    ledgerPack.position.set(0, 1.44, -0.34);
 
     head = new THREE.Group();
     head.position.set(0, 2.26, 0);
     const headMesh = new THREE.Mesh(cachedBox(0.7, 0.7, 0.7), [skinMat, skinMat, skinMat, skinMat, faceMat, skinMat]);
     const cap = new THREE.Mesh(cachedBox(0.78, 0.22, 0.78), hatMat);
     cap.position.y = 0.34;
+    const feather = new THREE.Mesh(cachedBox(0.08, 0.26, 0.12), goldMat);
+    feather.position.set(0.34, 0.48, -0.06);
     const badge = new THREE.Mesh(cachedBox(0.18, 0.18, 0.06), goldMat);
     badge.position.set(-0.18, 0.36, 0.4);
-    head.add(headMesh, cap, badge);
+    head.add(headMesh, cap, feather, badge);
 
     leftArm = new THREE.Group();
     leftArm.position.set(-0.56, 1.84, 0);
@@ -2482,7 +2846,9 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     lArm.position.y = -0.28;
     const lHand = new THREE.Mesh(cachedBox(0.24, 0.24, 0.24), skinMat);
     lHand.position.y = -0.66;
-    leftArm.add(lArm, lHand);
+    const scrollProp = new THREE.Mesh(cachedBox(0.14, 0.14, 0.38), apronMat);
+    scrollProp.position.set(0, -0.66, 0.16);
+    leftArm.add(lArm, lHand, scrollProp);
 
     rightArm = new THREE.Group();
     rightArm.position.set(0.56, 1.84, 0);
@@ -2502,7 +2868,7 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     rightLeg.position.set(0.21, 0.92, 0);
     rightLeg.add(lLegM.clone(), lBoot.clone());
 
-    body.add(torso, apron, pouch, head, leftArm, rightArm, leftLeg, rightLeg);
+    body.add(torso, apron, sash, pouch, ledgerPack, head, leftArm, rightArm, leftLeg, rightLeg);
   } else if (kind === 'blacksmith') {
     const tunicMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.78 });
     const apronMat = new THREE.MeshStandardMaterial({ color: 0x451a03, roughness: 0.85 });
@@ -2516,13 +2882,21 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     torso.position.y = 1.44;
     const apron = new THREE.Mesh(cachedBox(0.66, 0.82, 0.06), apronMat);
     apron.position.set(0, 1.32, 0.28);
+    const shoulderGuard = new THREE.Mesh(cachedBox(0.32, 0.24, 0.42), steelMat);
+    shoulderGuard.position.set(-0.56, 1.88, 0);
+    const toolBelt = new THREE.Mesh(cachedBox(0.96, 0.14, 0.58), apronMat);
+    toolBelt.position.y = 1.04;
+    const tongSide = new THREE.Mesh(cachedBox(0.12, 0.34, 0.14), steelMat);
+    tongSide.position.set(-0.52, 0.98, 0.12);
 
     head = new THREE.Group();
     head.position.set(0, 2.28, 0);
     const headMesh = new THREE.Mesh(cachedBox(0.72, 0.72, 0.72), [skinMat, skinMat, skinMat, skinMat, faceMat, skinMat]);
     const bandana = new THREE.Mesh(cachedBox(0.76, 0.18, 0.76), emberMat);
     bandana.position.y = 0.28;
-    head.add(headMesh, bandana);
+    const goggles = new THREE.Mesh(cachedBox(0.62, 0.14, 0.1), steelMat);
+    goggles.position.set(0, 0.28, 0.36);
+    head.add(headMesh, bandana, goggles);
 
     leftArm = new THREE.Group();
     leftArm.position.set(-0.62, 1.86, 0);
@@ -2530,7 +2904,9 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     lArm.position.y = -0.29;
     const lGlove = new THREE.Mesh(cachedBox(0.28, 0.24, 0.28), apronMat);
     lGlove.position.y = -0.66;
-    leftArm.add(lArm, lGlove);
+    const tongs = new THREE.Mesh(cachedBox(0.1, 0.1, 0.46), steelMat);
+    tongs.position.set(0, -0.66, 0.26);
+    leftArm.add(lArm, lGlove, tongs);
 
     rightArm = new THREE.Group();
     rightArm.position.set(0.62, 1.86, 0);
@@ -2551,7 +2927,7 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     rightLeg.position.set(0.23, 0.92, 0);
     rightLeg.add(lLegM.clone(), lBoot.clone());
 
-    body.add(torso, apron, head, leftArm, rightArm, leftLeg, rightLeg);
+    body.add(torso, apron, shoulderGuard, toolBelt, tongSide, head, leftArm, rightArm, leftLeg, rightLeg);
   } else if (kind === 'herbalist') {
     const dressMat = new THREE.MeshStandardMaterial({ color: 0x166534, roughness: 0.82 });
     const shawlMat = new THREE.MeshStandardMaterial({ color: 0x22c55e, roughness: 0.8 });
@@ -2566,6 +2942,10 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     shawl.position.y = 1.66;
     const herbBag = new THREE.Mesh(cachedBox(0.24, 0.28, 0.22), satchelMat);
     herbBag.position.set(-0.48, 1.14, 0.08);
+    const backBasket = new THREE.Mesh(cachedBox(0.48, 0.54, 0.26), satchelMat);
+    backBasket.position.set(0, 1.48, -0.36);
+    const basketBloom = new THREE.Mesh(cachedBox(0.34, 0.2, 0.18), bloomMat);
+    basketBloom.position.set(0, 1.78, -0.36);
 
     head = new THREE.Group();
     head.position.set(0, 2.24, 0);
@@ -2582,7 +2962,9 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     lArm.position.y = -0.28;
     const lHand = new THREE.Mesh(cachedBox(0.22, 0.2, 0.22), skinMat);
     lHand.position.y = -0.62;
-    leftArm.add(lArm, lHand);
+    const herbVial = new THREE.Mesh(cachedBox(0.14, 0.2, 0.14), shawlMat);
+    herbVial.position.set(0, -0.64, 0.16);
+    leftArm.add(lArm, lHand, herbVial);
 
     rightArm = new THREE.Group();
     rightArm.position.set(0.54, 1.8, 0);
@@ -2594,19 +2976,24 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
 
     leftLeg = new THREE.Group();
     rightLeg = new THREE.Group();
-    body.add(robe, shawl, herbBag, head, leftArm, rightArm, leftLeg, rightLeg);
+    body.add(robe, shawl, herbBag, backBasket, basketBloom, head, leftArm, rightArm, leftLeg, rightLeg);
   } else if (kind === 'explorer') {
     const coatMat = new THREE.MeshStandardMaterial({ color: 0x92400e, roughness: 0.82 });
     const trouserMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.85 });
     const skinMat = new THREE.MeshStandardMaterial({ color: 0xecc094, roughness: 0.65 });
     const faceMat = new THREE.MeshStandardMaterial({ map: textures.explorerFace, roughness: 0.58 });
     const hatMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.78 });
+    const brassMat = new THREE.MeshStandardMaterial({ color: 0xfbbf24, metalness: 0.82, roughness: 0.28 });
     const lanternMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0284c7, emissiveIntensity: 1.6 });
 
     const torso = new THREE.Mesh(cachedBox(0.84, 0.96, 0.46), coatMat);
     torso.position.y = 1.42;
+    const strap = new THREE.Mesh(cachedBox(0.88, 0.14, 0.5), hatMat);
+    strap.position.y = 1.12;
     const pack = new THREE.Mesh(cachedBox(0.56, 0.64, 0.34), trouserMat);
     pack.position.set(0, 1.44, -0.36);
+    const bedroll = new THREE.Mesh(cachedBox(0.6, 0.2, 0.2), coatMat);
+    bedroll.position.set(0, 1.84, -0.36);
 
     head = new THREE.Group();
     head.position.set(0, 2.25, 0);
@@ -2615,7 +3002,9 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     brim.position.y = 0.34;
     const crown = new THREE.Mesh(cachedBox(0.62, 0.28, 0.62), hatMat);
     crown.position.y = 0.5;
-    head.add(headMesh, brim, crown);
+    const band = new THREE.Mesh(cachedBox(0.66, 0.1, 0.66), brassMat);
+    band.position.y = 0.41;
+    head.add(headMesh, brim, crown, band);
 
     leftArm = new THREE.Group();
     leftArm.position.set(-0.56, 1.82, 0);
@@ -2623,13 +3012,17 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     lArm.position.y = -0.28;
     const lHand = new THREE.Mesh(cachedBox(0.24, 0.22, 0.24), skinMat);
     lHand.position.y = -0.64;
-    leftArm.add(lArm, lHand);
+    const compass = new THREE.Mesh(cachedBox(0.18, 0.08, 0.18), brassMat);
+    compass.position.set(0, -0.64, 0.18);
+    leftArm.add(lArm, lHand, compass);
 
     rightArm = new THREE.Group();
     rightArm.position.set(0.56, 1.82, 0);
     const lantern = new THREE.Mesh(cachedBox(0.22, 0.28, 0.22), lanternMat);
     lantern.position.set(0, -0.74, 0.2);
-    rightArm.add(lArm.clone(), lHand.clone(), lantern);
+    const lanternCap = new THREE.Mesh(cachedBox(0.26, 0.08, 0.26), brassMat);
+    lanternCap.position.set(0, -0.58, 0.2);
+    rightArm.add(lArm.clone(), lHand.clone(), lantern, lanternCap);
 
     leftLeg = new THREE.Group();
     leftLeg.position.set(-0.21, 0.92, 0);
@@ -2642,7 +3035,7 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     rightLeg.position.set(0.21, 0.92, 0);
     rightLeg.add(lLegM.clone(), lBoot.clone());
 
-    body.add(torso, pack, head, leftArm, rightArm, leftLeg, rightLeg);
+    body.add(torso, strap, pack, bedroll, head, leftArm, rightArm, leftLeg, rightLeg);
   } else if (kind === 'mayor') {
     const coatMat = new THREE.MeshStandardMaterial({ color: 0x1e3a8a, roughness: 0.74 });
     const furTrimMat = new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.88 });
@@ -2658,6 +3051,8 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     collar.position.y = 1.84;
     const chain = new THREE.Mesh(cachedBox(0.42, 0.16, 0.08), goldMat);
     chain.position.set(0, 1.7, 0.28);
+    const sash = new THREE.Mesh(cachedBox(0.9, 0.12, 0.54), goldMat);
+    sash.position.y = 1.06;
 
     head = new THREE.Group();
     head.position.set(0, 2.26, 0);
@@ -2666,7 +3061,9 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     capBrim.position.y = 0.34;
     const capTop = new THREE.Mesh(cachedBox(0.68, 0.22, 0.68), coatMat);
     capTop.position.y = 0.46;
-    head.add(headMesh, capBrim, capTop);
+    const seal = new THREE.Mesh(cachedBox(0.16, 0.16, 0.08), goldMat);
+    seal.position.set(0, 0.44, 0.38);
+    head.add(headMesh, capBrim, capTop, seal);
 
     leftArm = new THREE.Group();
     leftArm.position.set(-0.56, 1.84, 0);
@@ -2674,7 +3071,9 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     lArm.position.y = -0.28;
     const lHand = new THREE.Mesh(cachedBox(0.24, 0.22, 0.24), skinMat);
     lHand.position.y = -0.64;
-    leftArm.add(lArm, lHand);
+    const charter = new THREE.Mesh(cachedBox(0.14, 0.14, 0.36), furTrimMat);
+    charter.position.set(0, -0.66, 0.18);
+    leftArm.add(lArm, lHand, charter);
 
     rightArm = new THREE.Group();
     rightArm.position.set(0.56, 1.84, 0);
@@ -2695,7 +3094,7 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     rightLeg.position.set(0.21, 0.92, 0);
     rightLeg.add(lLegM.clone(), lBoot.clone());
 
-    body.add(torso, collar, chain, head, leftArm, rightArm, leftLeg, rightLeg);
+    body.add(torso, collar, chain, sash, head, leftArm, rightArm, leftLeg, rightLeg);
   } else if (kind === 'baker') {
     const dressMat = new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.82 });
     const apronMat = new THREE.MeshStandardMaterial({ color: 0xfef9c3, roughness: 0.9 });
@@ -2708,6 +3107,8 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     robe.position.y = 0.98;
     const apron = new THREE.Mesh(cachedBox(0.62, 1.18, 0.06), apronMat);
     apron.position.set(0, 1.12, 0.28);
+    const scarf = new THREE.Mesh(cachedBox(0.92, 0.16, 0.58), toqueMat);
+    scarf.position.y = 1.68;
 
     head = new THREE.Group();
     head.position.set(0, 2.24, 0);
@@ -2724,7 +3125,9 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     lArm.position.y = -0.28;
     const lHand = new THREE.Mesh(cachedBox(0.22, 0.2, 0.22), skinMat);
     lHand.position.y = -0.62;
-    leftArm.add(lArm, lHand);
+    const pin = new THREE.Mesh(cachedBox(0.08, 0.08, 0.44), breadMat);
+    pin.position.set(0, -0.64, 0.18);
+    leftArm.add(lArm, lHand, pin);
 
     rightArm = new THREE.Group();
     rightArm.position.set(0.54, 1.82, 0);
@@ -2736,7 +3139,7 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
 
     leftLeg = new THREE.Group();
     rightLeg = new THREE.Group();
-    body.add(robe, apron, head, leftArm, rightArm, leftLeg, rightLeg);
+    body.add(robe, apron, scarf, head, leftArm, rightArm, leftLeg, rightLeg);
   } else if (kind === 'alchemist') {
     const robeMat = new THREE.MeshStandardMaterial({ color: 0x581c87, roughness: 0.78 });
     const trimMat = new THREE.MeshStandardMaterial({ color: 0x0d9488, roughness: 0.72 });
@@ -2749,13 +3152,19 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     robe.position.y = 0.98;
     const sash = new THREE.Mesh(cachedBox(0.92, 0.18, 0.58), trimMat);
     sash.position.y = 1.04;
+    const collar = new THREE.Mesh(cachedBox(0.94, 0.16, 0.6), goldMat);
+    collar.position.y = 1.72;
+    const beltVial = new THREE.Mesh(cachedBox(0.14, 0.22, 0.14), vialMat);
+    beltVial.position.set(0.36, 1.06, 0.26);
 
     head = new THREE.Group();
     head.position.set(0, 2.25, 0);
     const headMesh = new THREE.Mesh(cachedBox(0.7, 0.7, 0.7), [skinMat, skinMat, skinMat, skinMat, faceMat, skinMat]);
     const hood = new THREE.Mesh(cachedBox(0.78, 0.36, 0.78), trimMat);
     hood.position.set(0, 0.26, -0.04);
-    head.add(headMesh, hood);
+    const lens = new THREE.Mesh(cachedBox(0.2, 0.14, 0.08), goldMat);
+    lens.position.set(0.14, 0.08, 0.37);
+    head.add(headMesh, hood, lens);
 
     leftArm = new THREE.Group();
     leftArm.position.set(-0.56, 1.84, 0);
@@ -2775,19 +3184,20 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
 
     leftLeg = new THREE.Group();
     rightLeg = new THREE.Group();
-    body.add(robe, sash, head, leftArm, rightArm, leftLeg, rightLeg);
+    body.add(robe, sash, collar, beltVial, head, leftArm, rightArm, leftLeg, rightLeg);
   } else if (kind === 'guard') {
     const armorMat = new THREE.MeshStandardMaterial({ color: 0x64748b, metalness: 0.86, roughness: 0.28 });
     const surcoatMat = new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.78 });
     const crestMat = new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.75 });
     const oakMat = new THREE.MeshStandardMaterial({ color: 0x5c3418, roughness: 0.8 });
-    const skinMat = new THREE.MeshStandardMaterial({ color: 0xecc094, roughness: 0.65 });
     const faceMat = new THREE.MeshStandardMaterial({ map: textures.guardFace, roughness: 0.55 });
 
     const torso = new THREE.Mesh(cachedBox(0.9, 1.0, 0.52), armorMat);
     torso.position.y = 1.44;
     const surcoat = new THREE.Mesh(cachedBox(0.94, 0.58, 0.56), surcoatMat);
     surcoat.position.y = 1.24;
+    const chestEmblem = new THREE.Mesh(cachedBox(0.22, 0.24, 0.08), crestMat);
+    chestEmblem.position.set(0, 1.48, 0.28);
 
     head = new THREE.Group();
     head.position.set(0, 2.28, 0);
@@ -2800,11 +3210,14 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
 
     leftArm = new THREE.Group();
     leftArm.position.set(-0.58, 1.86, 0);
+    const lPauldron = new THREE.Mesh(cachedBox(0.36, 0.26, 0.38), armorMat);
     const lArm = new THREE.Mesh(cachedBox(0.28, 0.6, 0.28), armorMat);
     lArm.position.y = -0.3;
     const guardShield = new THREE.Mesh(cachedBox(0.12, 0.82, 0.58), surcoatMat);
     guardShield.position.set(-0.2, -0.4, 0.14);
-    leftArm.add(lArm, guardShield);
+    const shieldBoss = new THREE.Mesh(cachedBox(0.15, 0.22, 0.22), crestMat);
+    shieldBoss.position.set(-0.22, -0.4, 0.14);
+    leftArm.add(lPauldron, lArm, guardShield, shieldBoss);
 
     rightArm = new THREE.Group();
     rightArm.position.set(0.58, 1.86, 0);
@@ -2812,7 +3225,7 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     pole.position.set(0, -0.2, 0.22);
     const halberdAxe = new THREE.Mesh(cachedBox(0.08, 0.44, 0.36), armorMat);
     halberdAxe.position.set(0, 0.78, 0.36);
-    rightArm.add(lArm.clone(), pole, halberdAxe);
+    rightArm.add(lPauldron.clone(), lArm.clone(), pole, halberdAxe);
 
     leftLeg = new THREE.Group();
     leftLeg.position.set(-0.22, 0.92, 0);
@@ -2825,7 +3238,7 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     rightLeg.position.set(0.22, 0.92, 0);
     rightLeg.add(lLegM.clone(), lBoot.clone());
 
-    body.add(torso, surcoat, head, leftArm, rightArm, leftLeg, rightLeg);
+    body.add(torso, surcoat, chestEmblem, head, leftArm, rightArm, leftLeg, rightLeg);
   } else {
     // Villager: Лісник Орест
     const cloakMat = new THREE.MeshStandardMaterial({ color: 0x166534, roughness: 0.82, side: THREE.DoubleSide });
@@ -2839,6 +3252,12 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
 
     const torso = new THREE.Mesh(cachedBox(0.84, 0.96, 0.48), tunicMat);
     torso.position.y = 1.42;
+    const belt = new THREE.Mesh(cachedBox(0.88, 0.14, 0.52), staffMat);
+    belt.position.y = 1.06;
+    const brooch = new THREE.Mesh(cachedBox(0.18, 0.18, 0.08), gemMat);
+    brooch.position.set(0, 1.66, 0.26);
+    const quiver = new THREE.Mesh(cachedBox(0.24, 0.62, 0.22), staffMat);
+    quiver.position.set(-0.24, 1.54, -0.34);
     const cloak = new THREE.Mesh(new THREE.PlaneGeometry(0.94, 1.1), cloakMat);
     cloak.position.set(0, 1.34, -0.27);
     cloak.rotation.x = 0.1;
@@ -2850,7 +3269,9 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     hatBrim.position.y = 0.34;
     const hatTop = new THREE.Mesh(cachedBox(0.64, 0.36, 0.64), hatMat);
     hatTop.position.y = 0.54;
-    head.add(headMesh, hatBrim, hatTop);
+    const hatFeather = new THREE.Mesh(cachedBox(0.08, 0.28, 0.1), gemMat);
+    hatFeather.position.set(0.32, 0.58, -0.06);
+    head.add(headMesh, hatBrim, hatTop, hatFeather);
 
     leftArm = new THREE.Group();
     leftArm.position.set(-0.56, 1.84, 0);
@@ -2880,7 +3301,7 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     rightLeg.position.set(0.21, 0.92, 0);
     rightLeg.add(lLegM.clone(), lBoot.clone());
 
-    body.add(torso, cloak, head, leftArm, rightArm, leftLeg, rightLeg);
+    body.add(torso, belt, brooch, quiver, cloak, head, leftArm, rightArm, leftLeg, rightLeg);
   }
 
   const shadow = new THREE.Mesh(
@@ -2915,6 +3336,7 @@ export function buildPeacefulMobModel(kind: PeacefulMobKind, textures: Procedura
     legFR,
     legBL,
     legBR,
+    tail,
     hpBarBg,
     hpBarFill,
     hitFlashMeshes,
@@ -3064,9 +3486,9 @@ function getCabinMaterials(textures: ProceduralTextures, style: CabinStyle): Cab
 
   const stoneMat = new THREE.MeshStandardMaterial({ map: textures.stoneBlock, roughness: 0.9, metalness: 0.05 });
   const wallTex =
-    style === 'shop' || style === 'bakery' || style === 'tavern'
+    style === 'shop' || style === 'bakery' || style === 'tavern' || style === 'manor_2f' || style === 'tavern_2f'
       ? textures.plasterTimber
-      : style === 'watchtower' || style === 'townhall'
+      : style === 'watchtower' || style === 'townhall' || style === 'watchkeep_2f'
         ? textures.stoneBlock
         : textures.cabinLog;
   const logMat = new THREE.MeshStandardMaterial({
@@ -3078,13 +3500,13 @@ function getCabinMaterials(textures: ProceduralTextures, style: CabinStyle): Cab
   const darkWoodMat = new THREE.MeshStandardMaterial({ color: 0x3b2314, roughness: 0.82 });
   const doorMat = new THREE.MeshStandardMaterial({ map: textures.doorWood, roughness: 0.72, metalness: 0.06 });
   const shutterColor =
-    style === 'shop'
+    style === 'shop' || style === 'manor_2f'
       ? 0xb91c1c
-      : style === 'watchtower' || style === 'townhall'
+      : style === 'watchtower' || style === 'townhall' || style === 'watchkeep_2f'
         ? 0x1e3a8a
         : style === 'cottage'
           ? 0xd97706
-          : style === 'bakery'
+          : style === 'bakery' || style === 'tavern_2f'
             ? 0x92400e
             : style === 'alchemy'
               ? 0x6b21a8
@@ -3093,21 +3515,21 @@ function getCabinMaterials(textures: ProceduralTextures, style: CabinStyle): Cab
                 : 0x1e4620;
   const shutterMat = new THREE.MeshStandardMaterial({ color: shutterColor, roughness: 0.72 });
   const roofTex =
-    style === 'shop' || style === 'cottage' || style === 'bakery' || style === 'tavern'
+    style === 'shop' || style === 'cottage' || style === 'bakery' || style === 'tavern' || style === 'tavern_2f'
       ? textures.terracottaRoof
-      : style === 'watchtower' || style === 'townhall' || style === 'alchemy'
+      : style === 'watchtower' || style === 'townhall' || style === 'alchemy' || style === 'manor_2f' || style === 'watchkeep_2f'
         ? textures.nordicSlate
         : textures.roofShingle;
   const roofMat = new THREE.MeshStandardMaterial({ map: roofTex, roughness: 0.7, metalness: 0.1 });
   const rugMat = new THREE.MeshStandardMaterial({
     color:
-      style === 'shop'
+      style === 'shop' || style === 'manor_2f'
         ? 0x1e3a8a
-        : style === 'watchtower' || style === 'townhall'
+        : style === 'watchtower' || style === 'townhall' || style === 'watchkeep_2f'
           ? 0x334155
           : style === 'alchemy'
             ? 0x581c87
-            : style === 'bakery'
+            : style === 'bakery' || style === 'tavern_2f'
               ? 0xb45309
               : 0x991b1b,
     roughness: 0.92,
@@ -3115,7 +3537,14 @@ function getCabinMaterials(textures: ProceduralTextures, style: CabinStyle): Cab
   const rugTrimMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.85 });
   const bedMat = new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.85 });
   const quiltMat = new THREE.MeshStandardMaterial({
-    color: style === 'cottage' ? 0x16a34a : style === 'watchtower' || style === 'townhall' ? 0x2563eb : 0xb91c1c,
+    color:
+      style === 'cottage'
+        ? 0x16a34a
+        : style === 'watchtower' || style === 'townhall' || style === 'watchkeep_2f'
+          ? 0x2563eb
+          : style === 'tavern_2f'
+            ? 0xd97706
+            : 0xb91c1c,
     roughness: 0.88,
   });
   const pillowMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.8 });
@@ -3171,10 +3600,15 @@ function getCabinMaterials(textures: ProceduralTextures, style: CabinStyle): Cab
   return set;
 }
 
-// Enterable, bug-free architectural houses: proper outward-sloped gable roofs, double hinged front doors & 8 distinct styles
+// Enterable, bug-free architectural houses: 1-story & 2-story interiors, batched static masonry/timber, double hinged doors
 export function buildCabin(textures: ProceduralTextures, style: CabinStyle = 'hunter'): CabinVisual {
   const cabin = new THREE.Group();
   const roofGroup = new THREE.Group();
+  const dims = getCabinDims(style);
+  const halfW = dims.halfW;
+  const halfD = dims.halfD;
+  const isTwoStory = dims.isTwoStory;
+
   const {
     stoneMat,
     logMat,
@@ -3199,351 +3633,350 @@ export function buildCabin(textures: ProceduralTextures, style: CabinStyle = 'hu
     stripeAccentMat,
   } = getCabinMaterials(textures, style);
 
-  const isTall = style === 'watchtower' || style === 'townhall';
-  const wallH = isTall ? 4.0 : 3.5;
+  const staticBatch = new StaticBoxBatcher();
+  const roofBatch = new StaticBoxBatcher();
 
-  // 1. Deep Stone Foundation (-1.05..0.72) & Plank Floor (top at y = 0.82) — never floats on slopes
-  const foundation = new THREE.Mesh(
-    new THREE.BoxGeometry(CABIN_HALF_W * 2 + 0.62, 1.8, CABIN_HALF_D * 2 + 0.62),
-    stoneMat,
-  );
-  foundation.position.y = -0.18;
-  const floorDeck = new THREE.Mesh(
-    new THREE.BoxGeometry(CABIN_HALF_W * 2 + 0.26, 0.14, CABIN_HALF_D * 2 + 0.26),
-    woodMat,
-  );
-  floorDeck.position.y = 0.76;
+  const isTall = style === 'watchtower' || style === 'townhall' || isTwoStory;
+  const wallH = isTwoStory ? 3.33 : isTall ? 4.0 : 3.5;
 
-  // Front Porch Deck + Deep Support Piers + Smooth Steps leading down to terrain
-  const porchDeck = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.26, 1.85), woodMat);
-  porchDeck.position.set(0, 0.7, CABIN_HALF_D + 0.92);
-  const porchFoundation = new THREE.Mesh(new THREE.BoxGeometry(4.7, 1.35, 1.8), stoneMat);
-  porchFoundation.position.set(0, -0.05, CABIN_HALF_D + 0.92);
-  const step1 = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.26, 0.68), woodMat);
-  step1.position.set(0, 0.46, CABIN_HALF_D + 1.9);
-  const step2 = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.5, 0.68), stoneMat);
-  step2.position.set(0, 0.16, CABIN_HALF_D + 2.52);
+  // 1. Deep Stone Foundation & Plank Floor (top at y = 0.82)
+  staticBatch.add(halfW * 2 + 0.62, 1.8, halfD * 2 + 0.62, 0, -0.18, 0, stoneMat);
+  staticBatch.add(halfW * 2 + 0.26, 0.14, halfD * 2 + 0.26, 0, 0.75, 0, woodMat);
+
+  // Front Porch Deck + Support Piers + Smooth Steps
+  staticBatch.add(4.8, 0.26, 1.85, 0, 0.7, halfD + 0.92, woodMat);
+  staticBatch.add(4.7, 1.35, 1.8, 0, -0.05, halfD + 0.92, stoneMat);
+  staticBatch.add(3.8, 0.26, 0.68, 0, 0.46, halfD + 1.9, woodMat);
+  staticBatch.add(3.8, 0.5, 0.68, 0, 0.16, halfD + 2.52, stoneMat);
 
   const porchPostH = wallH - 0.35;
-  const porchPostL = new THREE.Mesh(new THREE.BoxGeometry(0.24, porchPostH, 0.24), darkWoodMat);
-  porchPostL.position.set(-1.95, 0.8 + porchPostH * 0.5, CABIN_HALF_D + 1.62);
-  const porchPostR = porchPostL.clone();
-  porchPostR.position.x = 1.95;
+  staticBatch.add(0.24, porchPostH, 0.24, -1.95, 0.8 + porchPostH * 0.5, halfD + 1.62, darkWoodMat);
+  staticBatch.add(0.24, porchPostH, 0.24, 1.95, 0.8 + porchPostH * 0.5, halfD + 1.62, darkWoodMat);
 
-  // Corner timber columns flush from floor to exact roof base (zero gap)
-  const colH = wallH + 0.14;
-  for (const cx of [-CABIN_HALF_W - 0.08, CABIN_HALF_W + 0.08]) {
-    for (const cz of [-CABIN_HALF_D - 0.08, CABIN_HALF_D + 0.08]) {
-      const col = new THREE.Mesh(new THREE.BoxGeometry(0.46, colH, 0.46), darkWoodMat);
-      col.position.set(cx, 0.78 + colH * 0.5, cz);
-      cabin.add(col);
+  // Corner timber columns spanning 1F (or both floors for 2-story)
+  const colH = isTwoStory ? 7.04 : wallH + 0.14;
+  for (const cx of [-halfW - 0.08, halfW + 0.08]) {
+    for (const cz of [-halfD - 0.08, halfD + 0.08]) {
+      staticBatch.add(0.46, colH, 0.46, cx, 0.78 + colH * 0.5, cz, darkWoodMat);
     }
   }
-  cabin.add(foundation, porchFoundation, floorDeck, porchDeck, step1, step2, porchPostL, porchPostR);
 
-  // 2. Hollow Walls (wide 2.7m clear double doorway on +Z front wall)
+  // 2. Hollow 1F Walls (wide double doorway on +Z front wall)
   const wallY = 0.82 + wallH * 0.5;
   const wallT = 0.36;
+  const doorHalfSpan = isTwoStory ? 1.42 : 1.35;
+  const sideSpan = halfW - doorHalfSpan;
 
-  const leftWall = new THREE.Mesh(new THREE.BoxGeometry(wallT, wallH, CABIN_HALF_D * 2 + 0.22), logMat);
-  leftWall.position.set(-CABIN_HALF_W, wallY, 0);
-  const rightWall = new THREE.Mesh(new THREE.BoxGeometry(wallT, wallH, CABIN_HALF_D * 2 + 0.22), logMat);
-  rightWall.position.set(CABIN_HALF_W, wallY, 0);
-  const backWall = new THREE.Mesh(new THREE.BoxGeometry(CABIN_HALF_W * 2 + 0.22, wallH, wallT), logMat);
-  backWall.position.set(0, wallY, -CABIN_HALF_D);
+  staticBatch.add(wallT, wallH, halfD * 2 + 0.22, -halfW, wallY, 0, logMat);
+  staticBatch.add(wallT, wallH, halfD * 2 + 0.22, halfW, wallY, 0, logMat);
+  staticBatch.add(halfW * 2 + 0.22, wallH, wallT, 0, wallY, -halfD, logMat);
+  staticBatch.add(sideSpan, wallH, wallT, -doorHalfSpan - sideSpan * 0.5, wallY, halfD, logMat);
+  staticBatch.add(sideSpan, wallH, wallT, doorHalfSpan + sideSpan * 0.5, wallY, halfD, logMat);
+  staticBatch.add(doorHalfSpan * 2 + 0.04, wallH - 2.68, wallT, 0, 0.82 + 2.68 + (wallH - 2.68) * 0.5, halfD, logMat);
 
-  const sideSpan = CABIN_HALF_W - 1.35;
-  const frontLeftWall = new THREE.Mesh(new THREE.BoxGeometry(sideSpan, wallH, wallT), logMat);
-  frontLeftWall.position.set(-1.35 - sideSpan * 0.5, wallY, CABIN_HALF_D);
-  const frontRightWall = new THREE.Mesh(new THREE.BoxGeometry(sideSpan, wallH, wallT), logMat);
-  frontRightWall.position.set(1.35 + sideSpan * 0.5, wallY, CABIN_HALF_D);
-  const doorHeader = new THREE.Mesh(new THREE.BoxGeometry(2.74, wallH - 2.68, wallT), logMat);
-  doorHeader.position.set(0, 0.82 + 2.68 + (wallH - 2.68) * 0.5, CABIN_HALF_D);
+  staticBatch.add(0.18, 2.72, 0.48, -doorHalfSpan, 0.82 + 1.36, halfD, darkWoodMat);
+  staticBatch.add(0.18, 2.72, 0.48, doorHalfSpan, 0.82 + 1.36, halfD, darkWoodMat);
+  staticBatch.add(doorHalfSpan * 2 + 0.18, 0.18, 0.52, 0, 0.82 + 2.72, halfD, darkWoodMat);
 
-  const frameL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 2.72, 0.48), darkWoodMat);
-  frameL.position.set(-1.35, 0.82 + 1.36, CABIN_HALF_D);
-  const frameR = frameL.clone();
-  frameR.position.x = 1.35;
-  const lintel = new THREE.Mesh(new THREE.BoxGeometry(2.88, 0.18, 0.52), darkWoodMat);
-  lintel.position.set(0, 0.82 + 2.72, CABIN_HALF_D);
-
-  // Interactive symmetrical DOUBLE-LEAF Wooden Doors filling full 2.7m doorway cleanly
+  // Interactive symmetrical DOUBLE-LEAF Wooden Doors
+  const doorLeafW = isTwoStory ? 1.36 : 1.3;
   const doorPivotL = new THREE.Group();
-  doorPivotL.position.set(-1.3, 0.82, CABIN_HALF_D + 0.12);
-  const doorLeafL = new THREE.Mesh(new THREE.BoxGeometry(1.3, 2.58, 0.1), doorMat);
-  doorLeafL.position.set(0.65, 1.29, 0);
+  doorPivotL.position.set(-doorLeafW, 0.82, halfD + 0.12);
+  const doorLeafL = new THREE.Mesh(new THREE.BoxGeometry(doorLeafW, 2.58, 0.1), doorMat);
+  doorLeafL.position.set(doorLeafW * 0.5, 1.29, 0);
   const doorHandleL = new THREE.Mesh(new THREE.SphereGeometry(0.075, 8, 8), goldMat);
-  doorHandleL.position.set(1.14, 1.18, 0.08);
+  doorHandleL.position.set(doorLeafW - 0.16, 1.18, 0.08);
   doorPivotL.add(doorLeafL, doorHandleL);
 
   const doorPivotR = new THREE.Group();
-  doorPivotR.position.set(1.3, 0.82, CABIN_HALF_D + 0.12);
-  const doorLeafR = new THREE.Mesh(new THREE.BoxGeometry(1.3, 2.58, 0.1), doorMat);
-  doorLeafR.position.set(-0.65, 1.29, 0);
+  doorPivotR.position.set(doorLeafW, 0.82, halfD + 0.12);
+  const doorLeafR = new THREE.Mesh(new THREE.BoxGeometry(doorLeafW, 2.58, 0.1), doorMat);
+  doorLeafR.position.set(-doorLeafW * 0.5, 1.29, 0);
   const doorHandleR = new THREE.Mesh(new THREE.SphereGeometry(0.075, 8, 8), goldMat);
-  doorHandleR.position.set(-1.14, 1.18, 0.08);
+  doorHandleR.position.set(-(doorLeafW - 0.16), 1.18, 0.08);
   doorPivotR.add(doorLeafR, doorHandleR);
+  cabin.add(doorPivotL, doorPivotR);
 
-  // Front & side windows with styled shutters & flower boxes
-  const winL = new THREE.Mesh(new THREE.BoxGeometry(1.02, 1.0, 0.42), glowWinMat);
-  winL.position.set(-2.62, 2.55, CABIN_HALF_D);
-  const winR = winL.clone();
-  winR.position.x = 2.62;
-  const winSide = new THREE.Mesh(new THREE.BoxGeometry(0.42, 1.0, 1.25), glowWinMat);
-  winSide.position.set(CABIN_HALF_W, 2.55, 0.4);
-  const winSideL = winSide.clone();
-  winSideL.position.x = -CABIN_HALF_W;
+  // Windows & shutters + flower boxes (batched)
+  const frontWinX = isTwoStory ? 3.05 : 2.62;
+  staticBatch.add(1.02, 1.0, 0.42, -frontWinX, 2.55, halfD, glowWinMat);
+  staticBatch.add(1.02, 1.0, 0.42, frontWinX, 2.55, halfD, glowWinMat);
+  staticBatch.add(0.42, 1.0, 1.25, halfW, 2.55, 0.4, glowWinMat);
+  staticBatch.add(0.42, 1.0, 1.25, -halfW, 2.55, 0.4, glowWinMat);
 
-  for (const wx of [-2.62, 2.62]) {
-    const shL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.08, 0.12), shutterMat);
-    shL.position.set(wx - 0.62, 2.55, CABIN_HALF_D + 0.22);
-    const shR = shL.clone();
-    shR.position.x = wx + 0.62;
-    const box = new THREE.Mesh(new THREE.BoxGeometry(1.18, 0.24, 0.34), darkWoodMat);
-    box.position.set(wx, 1.92, CABIN_HALF_D + 0.3);
-    const bush = new THREE.Mesh(new THREE.BoxGeometry(1.06, 0.2, 0.26), greeneryMat);
-    bush.position.set(wx, 2.08, CABIN_HALF_D + 0.3);
-    cabin.add(shL, shR, box, bush);
+  for (const wx of [-frontWinX, frontWinX]) {
+    staticBatch.add(0.22, 1.08, 0.12, wx - 0.62, 2.55, halfD + 0.22, shutterMat);
+    staticBatch.add(0.22, 1.08, 0.12, wx + 0.62, 2.55, halfD + 0.22, shutterMat);
+    staticBatch.add(1.18, 0.24, 0.34, wx, 1.92, halfD + 0.3, darkWoodMat);
+    staticBatch.add(1.06, 0.2, 0.26, wx, 2.08, halfD + 0.3, greeneryMat);
     for (let f = -1; f <= 1; f++) {
-      const fl = new THREE.Mesh(
-        new THREE.DodecahedronGeometry(0.11, 0),
+      staticBatch.add(
+        0.18,
+        0.18,
+        0.18,
+        wx + f * 0.32,
+        2.22,
+        halfD + 0.32,
         f === 0 ? flowerGoldMat : flowerPinkMat,
       );
-      fl.position.set(wx + f * 0.32, 2.2, CABIN_HALF_D + 0.32);
-      cabin.add(fl);
     }
   }
 
-  const porchLantern = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.36, 0.26), glowWinMat);
-  porchLantern.position.set(1.55, 3.08, CABIN_HALF_D + 0.38);
-  cabin.add(porchLantern);
+  staticBatch.add(0.26, 0.36, 0.26, 1.55, 3.08, halfD + 0.38, glowWinMat);
 
-  if (style === 'shop' || style === 'bakery' || style === 'alchemy' || style === 'tavern' || style === 'townhall') {
+  if (
+    style === 'shop' ||
+    style === 'bakery' ||
+    style === 'alchemy' ||
+    style === 'tavern' ||
+    style === 'townhall' ||
+    style === 'tavern_2f' ||
+    style === 'manor_2f'
+  ) {
     const signTex =
       style === 'bakery'
         ? textures.bakerySign
         : style === 'alchemy'
           ? textures.alchemySign
-          : style === 'tavern'
+          : style === 'tavern' || style === 'tavern_2f'
             ? textures.tavernSign
-            : style === 'townhall'
+            : style === 'townhall' || style === 'manor_2f'
               ? textures.townhallSign
               : textures.shopSign;
     const signBoard = new THREE.Mesh(
       new THREE.BoxGeometry(2.85, 1.02, 0.14),
       new THREE.MeshStandardMaterial({ map: signTex, roughness: 0.6 }),
     );
-    signBoard.position.set(0, isTall ? 4.55 : 4.18, CABIN_HALF_D + 1.65);
-    const lanternL = porchLantern.clone();
-    lanternL.position.set(-1.55, 3.08, CABIN_HALF_D + 0.38);
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.32, 0.72, 10), darkWoodMat);
-    barrel.position.set(-2.15, 1.18, CABIN_HALF_D + 0.75);
-    const barrelGold = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.12, 10), goldMat);
-    barrelGold.position.set(-2.15, 1.56, CABIN_HALF_D + 0.75);
-    cabin.add(signBoard, lanternL, barrel, barrelGold);
-  } else if (style === 'watchtower') {
+    signBoard.position.set(0, isTwoStory ? 3.85 : isTall ? 4.55 : 4.18, halfD + 1.65);
+    staticBatch.add(0.26, 0.36, 0.26, -1.55, 3.08, halfD + 0.38, glowWinMat);
+    staticBatch.add(0.68, 0.74, 0.68, -2.15, 1.18, halfD + 0.75, darkWoodMat);
+    staticBatch.add(0.6, 0.14, 0.6, -2.15, 1.58, halfD + 0.75, goldMat);
+    cabin.add(signBoard);
+  } else if (style === 'watchtower' || style === 'watchkeep_2f') {
     const forgeBoard = new THREE.Mesh(
       new THREE.BoxGeometry(2.6, 0.92, 0.14),
       new THREE.MeshStandardMaterial({ map: textures.forgeSign, roughness: 0.6 }),
     );
-    forgeBoard.position.set(0, 4.55, CABIN_HALF_D + 1.65);
-    const anvilOut = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.5, 0.95), ironMat);
-    anvilOut.position.set(2.15, 1.06, CABIN_HALF_D + 0.72);
-    cabin.add(forgeBoard, anvilOut);
+    forgeBoard.position.set(0, isTwoStory ? 3.85 : 4.55, halfD + 1.65);
+    staticBatch.add(0.65, 0.5, 0.95, 2.15, 1.06, halfD + 0.72, ironMat);
+    cabin.add(forgeBoard);
   } else if (style === 'cottage') {
     const herbBoard = new THREE.Mesh(
       new THREE.BoxGeometry(2.6, 0.92, 0.14),
       new THREE.MeshStandardMaterial({ map: textures.herbalSign, roughness: 0.6 }),
     );
-    herbBoard.position.set(0, 4.18, CABIN_HALF_D + 1.65);
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.32, 0.65, 8), darkWoodMat);
-    barrel.position.set(2.2, 1.14, CABIN_HALF_D + 0.7);
-    const bushTop = new THREE.Mesh(new THREE.DodecahedronGeometry(0.42, 0), greeneryMat);
-    bushTop.position.set(2.2, 1.62, CABIN_HALF_D + 0.7);
-    cabin.add(herbBoard, barrel, bushTop);
+    herbBoard.position.set(0, 4.18, halfD + 1.65);
+    staticBatch.add(0.66, 0.65, 0.66, 2.2, 1.14, halfD + 0.7, darkWoodMat);
+    staticBatch.add(0.72, 0.72, 0.72, 2.2, 1.66, halfD + 0.7, greeneryMat);
+    cabin.add(herbBoard);
   }
 
-  cabin.add(
-    leftWall,
-    rightWall,
-    backWall,
-    frontLeftWall,
-    frontRightWall,
-    doorHeader,
-    frameL,
-    frameR,
-    lintel,
-    doorPivotL,
-    doorPivotR,
-    winL,
-    winR,
-    winSide,
-    winSideL,
-  );
-
-  // 3. Cozy Walkable Interior (at y = 0.82)
-  const rug = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.04, 2.7), rugMat);
-  rug.position.set(0, 0.84, 0.35);
-  const rugTrim = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.045, 2.3), rugTrimMat);
-  rugTrim.position.set(0, 0.845, 0.35);
-
+  // 3. Cozy Walkable Interior (1F at y = 0.82)
   const hearthFlame = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.58, 6), emberMat);
   const hearthLight = new THREE.PointLight(0xffa94d, 5.2, 14, 1.5);
 
-  if (style === 'shop' || style === 'bakery' || style === 'alchemy') {
-    // Merchant Interior: Oak Counter, Shelves, Trade Crates & Custom Style Props
-    const counterBase = new THREE.Mesh(new THREE.BoxGeometry(3.75, 0.94, 0.96), darkWoodMat);
-    counterBase.position.set(0.15, 1.29, -1.1);
-    const counterTop = new THREE.Mesh(new THREE.BoxGeometry(3.96, 0.14, 1.12), woodMat);
-    counterTop.position.set(0.15, 1.82, -1.1);
+  if (isTwoStory) {
+    // 2-story Grand Ground Hall matching TWO_STORY_GROUND_BOXES
+    staticBatch.add(4.2, 0.04, 3.4, -0.4, 0.84, 0.35, rugMat);
+    staticBatch.add(3.8, 0.045, 3.0, -0.4, 0.845, 0.35, rugTrimMat);
 
-    const coinStack = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.24, 10), goldMat);
-    coinStack.position.set(-0.6, 2.0, -0.95);
-    const displayPropColor = style === 'alchemy' ? 0xc084fc : style === 'bakery' ? 0xf59e0b : 0x38bdf8;
-    const displayGem = new THREE.Mesh(
-      style === 'bakery' ? new THREE.BoxGeometry(0.45, 0.22, 0.26) : new THREE.OctahedronGeometry(0.22, 0),
-      new THREE.MeshStandardMaterial({
-        color: displayPropColor,
-        emissive: style === 'bakery' ? 0x78350f : displayPropColor,
-        emissiveIntensity: style === 'bakery' ? 0.35 : 1.4,
-      }),
-    );
-    displayGem.position.set(0.95, 2.06, -0.98);
-    const potionDisplay = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.12, 0.15, 0.34, 8),
-      new THREE.MeshStandardMaterial({
-        color: style === 'bakery' ? 0xfde047 : 0x4ade80,
-        emissive: style === 'bakery' ? 0xb45309 : 0x16a34a,
-        emissiveIntensity: 0.9,
-      }),
-    );
-    potionDisplay.position.set(0.15, 2.05, -0.92);
+    // Fireplace against back wall (x = -0.35, z = -3.5)
+    staticBatch.add(2.1, 2.3, 0.9, -0.35, 1.95, -halfD + 0.52, stoneMat);
+    staticBatch.add(2.35, 0.18, 1.05, -0.35, 2.95, -halfD + 0.56, darkWoodMat);
+    staticBatch.add(1.1, 0.28, 0.45, -0.35, 1.02, -halfD + 0.66, emberMat);
+    hearthFlame.position.set(-0.35, 1.38, -halfD + 0.66);
+    hearthLight.position.set(-0.35, 2.35, -halfD + 1.45);
 
-    hearthFlame.position.set(-1.35, 2.15, -0.98);
-    hearthLight.position.set(0, 3.1, -0.4);
+    // Left Workbench [-4.3, -2.55, -1.9, 0.2]
+    staticBatch.add(1.55, 0.82, 1.9, -3.42, 1.23, -0.85, darkWoodMat);
+    staticBatch.add(1.7, 0.14, 2.05, -3.42, 1.68, -0.85, woodMat);
+    staticBatch.add(0.38, 0.26, 0.54, -3.35, 1.88, -0.45, ironMat);
+    staticBatch.add(0.24, 0.3, 0.24, -3.55, 1.9, -1.35, glowWinMat);
 
-    // Display shelves along left wall (matches collider [-3.5, -2.15, -2.8, 0.45])
-    const shopShelf = new THREE.Mesh(new THREE.BoxGeometry(1.15, 2.35, 3.0), darkWoodMat);
-    shopShelf.position.set(-2.85, 2.0, -1.18);
-    const bottleColors =
-      style === 'bakery'
-        ? [0xfbbf24, 0xd97706, 0xfef08a, 0xb45309]
-        : style === 'alchemy'
-          ? [0xc084fc, 0x2dd4bf, 0xf43f5e, 0x38bdf8]
-          : [0xef4444, 0x38bdf8, 0x22c55e, 0xf59e0b];
-    for (let s = 0; s < 4; s++) {
-      const flask = new THREE.Mesh(
-        style === 'bakery' ? new THREE.BoxGeometry(0.26, 0.18, 0.32) : new THREE.CylinderGeometry(0.11, 0.14, 0.36, 8),
-        new THREE.MeshStandardMaterial({
-          color: bottleColors[s],
-          emissive: bottleColors[s],
-          emissiveIntensity: style === 'bakery' ? 0.18 : 0.65,
-        }),
-      );
-      flask.position.set(-2.55, 2.1, -2.2 + s * 0.68);
-      cabin.add(flask);
-    }
-
-    // Trade crates on front-right (matches collider [2.25, 3.55, 0.5, 2.25])
-    const crate1 = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.92, 1.1), woodMat);
-    crate1.position.set(2.85, 1.28, 1.35);
-    const crate2 = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.72, 0.78), darkWoodMat);
-    crate2.position.set(2.9, 2.1, 1.28);
-
-    cabin.add(
-      counterBase,
-      counterTop,
-      coinStack,
-      displayGem,
-      potionDisplay,
-      shopShelf,
-      crate1,
-      crate2,
-    );
-  } else {
-    // Stone Fireplace against back wall with glowing flame
-    const hearthBase = new THREE.Mesh(new THREE.BoxGeometry(2.1, 2.1, 0.9), stoneMat);
-    hearthBase.position.set(0, 1.85, -CABIN_HALF_D + 0.5);
-    const mantel = new THREE.Mesh(new THREE.BoxGeometry(2.35, 0.16, 1.05), darkWoodMat);
-    mantel.position.set(0, 2.85, -CABIN_HALF_D + 0.55);
-    const emberBed = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.28, 0.45), emberMat);
-    emberBed.position.set(0, 1.02, -CABIN_HALF_D + 0.65);
-    hearthFlame.position.set(0, 1.38, -CABIN_HALF_D + 0.65);
-    hearthLight.position.set(0, 2.15, -CABIN_HALF_D + 1.35);
-
-    // Crafting Workbench on left wall (matches collider [-3.5, -1.9, -1.6, 0.3])
-    const benchTop = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.14, 1.7), woodMat);
-    benchTop.position.set(-2.7, 1.68, -0.65);
-    const benchBase = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.82, 1.5), darkWoodMat);
-    benchBase.position.set(-2.7, 1.23, -0.65);
-    const anvil = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.26, 0.54), ironMat);
-    anvil.position.set(-2.65, 1.88, -0.25);
-    const benchLantern = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.3, 0.24), glowWinMat);
-    benchLantern.position.set(-2.85, 1.9, -1.2);
-
-    // Bookshelf against back-left wall (matches collider [-3.5, -1.8, -3.0, -2.0])
-    const shelfFrame = new THREE.Mesh(new THREE.BoxGeometry(1.45, 2.2, 0.65), darkWoodMat);
-    shelfFrame.position.set(-2.65, 1.92, -2.55);
+    // Bookshelf [-4.25, -2.4, -3.55, -2.5]
+    staticBatch.add(1.65, 2.25, 0.82, -3.32, 1.94, -3.02, darkWoodMat);
     const bookColors = [0xef4444, 0x3b82f6, 0x10b981, 0xf59e0b, 0xa855f7];
     for (let row = 0; row < 2; row++) {
       for (let b = 0; b < 5; b++) {
-        const book = new THREE.Mesh(
-          new THREE.BoxGeometry(0.18, 0.42, 0.34),
-          new THREE.MeshStandardMaterial({ color: bookColors[(b + row) % bookColors.length], roughness: 0.7 }),
-        );
-        book.position.set(-3.08 + b * 0.22, 1.48 + row * 0.72, -2.42);
+        const bookMat = new THREE.MeshStandardMaterial({
+          color: bookColors[(b + row) % bookColors.length],
+          roughness: 0.7,
+        });
+        const book = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.42, 0.34), bookMat);
+        book.position.set(-3.8 + b * 0.24, 1.48 + row * 0.72, -2.78);
         book.userData.noCastShadow = true;
         cabin.add(book);
       }
     }
 
-    // Interactive Bed on back-right (matches collider [1.5, 3.6, -2.9, -1.4])
-    const bedFrame = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.44, 1.25), darkWoodMat);
-    bedFrame.position.set(2.55, 1.04, -2.15);
-    const headboard = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.15, 1.3), darkWoodMat);
-    headboard.position.set(3.45, 1.4, -2.15);
-    const mattress = new THREE.Mesh(new THREE.BoxGeometry(1.76, 0.22, 1.12), bedMat);
-    mattress.position.set(2.55, 1.33, -2.15);
-    const quilt = new THREE.Mesh(new THREE.BoxGeometry(1.18, 0.24, 1.14), quiltMat);
-    quilt.position.set(2.26, 1.35, -2.15);
-    const pillow = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.18, 0.82), pillowMat);
-    pillow.position.set(3.15, 1.48, -2.15);
+    // Staircase inner partition [1.95, 2.25, -2.2, 2.5] + 11 wooden stepped treads up to 2nd floor (y = 4.22)
+    staticBatch.add(0.28, 3.25, 4.7, 2.1, 2.45, 0.15, darkWoodMat);
+    for (let s = 0; s < 11; s++) {
+      const t = (s + 0.5) / 11;
+      const sz = 2.65 - t * 4.45;
+      const topY = 0.82 + t * 3.4;
+      staticBatch.add(2.35, 0.32, 0.44, 3.4, topY - 0.16, sz, s % 2 === 0 ? woodMat : darkWoodMat);
+    }
 
-    const tableTop = new THREE.Mesh(new THREE.CylinderGeometry(0.64, 0.64, 0.1, 10), woodMat);
-    tableTop.position.set(2.45, 1.58, 1.1);
-    const tableLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 0.74, 8), darkWoodMat);
-    tableLeg.position.set(2.45, 1.19, 1.1);
-    const mug = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.16, 8), pillowMat);
-    mug.position.set(2.35, 1.71, 1.05);
-    mug.userData.noCastShadow = true;
-    const tableLantern = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.24, 0.18), glowWinMat);
-    tableLantern.position.set(2.6, 1.75, 1.22);
-    tableLantern.userData.noCastShadow = true;
+    // 2nd Floor Deck (top at y = 4.22), leaving open stairwell cutout lx in [2.05..4.55], lz in [-1.85..2.85]
+    staticBatch.add(6.95, 0.14, 8.2, -1.425, 4.15, 0, woodMat);
+    staticBatch.add(2.85, 0.14, 2.25, 3.475, 4.15, -2.975, woodMat);
+    staticBatch.add(2.85, 0.14, 1.25, 3.475, 4.15, 3.475, woodMat);
+    staticBatch.add(0.35, 0.14, 4.7, 4.725, 4.15, 0.5, woodMat);
+    // Front 2F balcony deck (lz = 4.0..5.4)
+    staticBatch.add(9.9, 0.16, 1.4, 0, 4.14, 4.7, woodMat);
+    // Underside timber support beams for balcony
+    staticBatch.add(0.28, 0.28, 1.35, -3.5, 3.92, 4.68, darkWoodMat);
+    staticBatch.add(0.28, 0.28, 1.35, 3.5, 3.92, 4.68, darkWoodMat);
 
-    cabin.add(
-      hearthBase,
-      mantel,
-      emberBed,
-      benchTop,
-      benchBase,
-      anvil,
-      benchLantern,
-      shelfFrame,
-      bedFrame,
-      headboard,
-      mattress,
-      quilt,
-      pillow,
-      tableTop,
-      tableLeg,
-      mug,
-      tableLantern,
-    );
+    // 2nd Floor Walls (y = 4.22..7.72) with open balcony doorway lx in [-1.35..1.35]
+    const wallH2 = 3.5;
+    const wallY2 = 4.22 + wallH2 * 0.5;
+    const sideSpan2 = halfW - 1.35;
+    staticBatch.add(wallT, wallH2, halfD * 2 + 0.22, -halfW, wallY2, 0, logMat);
+    staticBatch.add(wallT, wallH2, halfD * 2 + 0.22, halfW, wallY2, 0, logMat);
+    staticBatch.add(halfW * 2 + 0.22, wallH2, wallT, 0, wallY2, -halfD, logMat);
+    staticBatch.add(sideSpan2, wallH2, wallT, -1.35 - sideSpan2 * 0.5, wallY2, halfD, logMat);
+    staticBatch.add(sideSpan2, wallH2, wallT, 1.35 + sideSpan2 * 0.5, wallY2, halfD, logMat);
+    staticBatch.add(2.74, wallH2 - 2.68, wallT, 0, 4.22 + 2.68 + (wallH2 - 2.68) * 0.5, halfD, logMat);
+    staticBatch.add(2.88, 0.18, 0.52, 0, 4.22 + 2.72, halfD, darkWoodMat);
+
+    // 2F Glowing Windows
+    staticBatch.add(1.02, 0.96, 0.42, -frontWinX, 6.0, halfD, glowWinMat);
+    staticBatch.add(1.02, 0.96, 0.42, frontWinX, 6.0, halfD, glowWinMat);
+    staticBatch.add(0.42, 0.96, 1.25, halfW, 6.0, 0.4, glowWinMat);
+    staticBatch.add(0.42, 0.96, 1.25, -halfW, 6.0, 0.4, glowWinMat);
+
+    // Front Balcony Guardrails (lz = 4.0..5.35)
+    staticBatch.add(0.24, 1.05, 1.38, -halfW, 4.74, halfD + 0.69, darkWoodMat);
+    staticBatch.add(0.24, 1.05, 1.38, halfW, 4.74, halfD + 0.69, darkWoodMat);
+    staticBatch.add(halfW * 2 + 0.24, 0.92, 0.22, 0, 4.68, halfD + 1.34, darkWoodMat);
+
+    // 2F Stairwell Guardrails [1.92..2.24, -1.75..2.95] & [1.92..4.55, 2.75..3.05]
+    staticBatch.add(0.24, 0.98, 4.68, 2.08, 4.71, 0.6, darkWoodMat);
+    staticBatch.add(2.55, 0.98, 0.24, 3.3, 4.71, 2.9, darkWoodMat);
+
+    // 2F Master Rug, Bed [-4.25, -2.35, -3.55, -2.0], & Wardrobe [-4.25, -2.85, 0.8, 2.4]
+    staticBatch.add(3.6, 0.04, 3.0, -0.8, 4.24, -0.4, rugMat);
+    staticBatch.add(3.2, 0.045, 2.6, -0.8, 4.245, -0.4, rugTrimMat);
+
+    staticBatch.add(1.85, 0.44, 1.45, -3.3, 4.44, -2.78, darkWoodMat);
+    staticBatch.add(0.2, 1.15, 1.5, -4.15, 4.8, -2.78, darkWoodMat);
+    staticBatch.add(1.7, 0.22, 1.3, -3.3, 4.73, -2.78, bedMat);
+    staticBatch.add(1.18, 0.24, 1.32, -3.02, 4.75, -2.78, quiltMat);
+    staticBatch.add(0.42, 0.18, 0.88, -3.9, 4.88, -2.78, pillowMat);
+
+    staticBatch.add(1.25, 2.15, 1.5, -3.55, 5.3, 1.6, darkWoodMat);
+    staticBatch.add(0.14, 1.9, 1.36, -2.92, 5.3, 1.6, woodMat);
+    staticBatch.add(0.1, 0.24, 0.12, -2.84, 5.32, 1.6, goldMat);
+
+    // Upstairs Lantern Chandelier
+    staticBatch.add(0.12, 0.55, 0.12, -0.8, 7.42, -0.4, ironMat);
+    staticBatch.add(0.46, 0.34, 0.46, -0.8, 7.04, -0.4, glowWinMat);
+  } else {
+    staticBatch.add(3.6, 0.04, 2.7, 0, 0.84, 0.35, rugMat);
+    staticBatch.add(3.2, 0.045, 2.3, 0, 0.845, 0.35, rugTrimMat);
+
+    if (style === 'shop' || style === 'bakery' || style === 'alchemy') {
+      staticBatch.add(3.75, 0.94, 0.96, 0.15, 1.29, -1.1, darkWoodMat);
+      staticBatch.add(3.96, 0.14, 1.12, 0.15, 1.82, -1.1, woodMat);
+
+      const coinStack = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.24, 10), goldMat);
+      coinStack.position.set(-0.6, 2.0, -0.95);
+      const displayPropColor = style === 'alchemy' ? 0xc084fc : style === 'bakery' ? 0xf59e0b : 0x38bdf8;
+      const displayGem = new THREE.Mesh(
+        style === 'bakery' ? new THREE.BoxGeometry(0.45, 0.22, 0.26) : new THREE.OctahedronGeometry(0.22, 0),
+        new THREE.MeshStandardMaterial({
+          color: displayPropColor,
+          emissive: style === 'bakery' ? 0x78350f : displayPropColor,
+          emissiveIntensity: style === 'bakery' ? 0.35 : 1.4,
+        }),
+      );
+      displayGem.position.set(0.95, 2.06, -0.98);
+      const potionDisplay = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.12, 0.15, 0.34, 8),
+        new THREE.MeshStandardMaterial({
+          color: style === 'bakery' ? 0xfde047 : 0x4ade80,
+          emissive: style === 'bakery' ? 0xb45309 : 0x16a34a,
+          emissiveIntensity: 0.9,
+        }),
+      );
+      potionDisplay.position.set(0.15, 2.05, -0.92);
+
+      hearthFlame.position.set(-1.35, 2.15, -0.98);
+      hearthLight.position.set(0, 3.1, -0.4);
+
+      staticBatch.add(1.15, 2.35, 3.0, -2.85, 2.0, -1.18, darkWoodMat);
+      const bottleColors =
+        style === 'bakery'
+          ? [0xfbbf24, 0xd97706, 0xfef08a, 0xb45309]
+          : style === 'alchemy'
+            ? [0xc084fc, 0x2dd4bf, 0xf43f5e, 0x38bdf8]
+            : [0xef4444, 0x38bdf8, 0x22c55e, 0xf59e0b];
+      for (let s = 0; s < 4; s++) {
+        const flask = new THREE.Mesh(
+          style === 'bakery' ? new THREE.BoxGeometry(0.26, 0.18, 0.32) : new THREE.CylinderGeometry(0.11, 0.14, 0.36, 8),
+          new THREE.MeshStandardMaterial({
+            color: bottleColors[s],
+            emissive: bottleColors[s],
+            emissiveIntensity: style === 'bakery' ? 0.18 : 0.65,
+          }),
+        );
+        flask.position.set(-2.55, 2.1, -2.2 + s * 0.68);
+        cabin.add(flask);
+      }
+
+      staticBatch.add(1.1, 0.92, 1.1, 2.85, 1.28, 1.35, woodMat);
+      staticBatch.add(0.78, 0.72, 0.78, 2.9, 2.1, 1.28, darkWoodMat);
+
+      cabin.add(coinStack, displayGem, potionDisplay);
+    } else {
+      staticBatch.add(2.1, 2.1, 0.9, 0, 1.85, -halfD + 0.5, stoneMat);
+      staticBatch.add(2.35, 0.16, 1.05, 0, 2.85, -halfD + 0.55, darkWoodMat);
+      staticBatch.add(1.1, 0.28, 0.45, 0, 1.02, -halfD + 0.65, emberMat);
+      hearthFlame.position.set(0, 1.38, -halfD + 0.65);
+      hearthLight.position.set(0, 2.15, -halfD + 1.35);
+
+      staticBatch.add(1.45, 0.14, 1.7, -2.7, 1.68, -0.65, woodMat);
+      staticBatch.add(1.3, 0.82, 1.5, -2.7, 1.23, -0.65, darkWoodMat);
+      staticBatch.add(0.38, 0.26, 0.54, -2.65, 1.88, -0.25, ironMat);
+      staticBatch.add(0.24, 0.3, 0.24, -2.85, 1.9, -1.2, glowWinMat);
+
+      staticBatch.add(1.45, 2.2, 0.65, -2.65, 1.92, -2.55, darkWoodMat);
+      const bookColors = [0xef4444, 0x3b82f6, 0x10b981, 0xf59e0b, 0xa855f7];
+      for (let row = 0; row < 2; row++) {
+        for (let b = 0; b < 5; b++) {
+          const book = new THREE.Mesh(
+            new THREE.BoxGeometry(0.18, 0.42, 0.34),
+            new THREE.MeshStandardMaterial({ color: bookColors[(b + row) % bookColors.length], roughness: 0.7 }),
+          );
+          book.position.set(-3.08 + b * 0.22, 1.48 + row * 0.72, -2.42);
+          book.userData.noCastShadow = true;
+          cabin.add(book);
+        }
+      }
+
+      staticBatch.add(1.9, 0.44, 1.25, 2.55, 1.04, -2.15, darkWoodMat);
+      staticBatch.add(0.18, 1.15, 1.3, 3.45, 1.4, -2.15, darkWoodMat);
+      staticBatch.add(1.76, 0.22, 1.12, 2.55, 1.33, -2.15, bedMat);
+      staticBatch.add(1.18, 0.24, 1.14, 2.26, 1.35, -2.15, quiltMat);
+      staticBatch.add(0.45, 0.18, 0.82, 3.15, 1.48, -2.15, pillowMat);
+
+      const tableTop = new THREE.Mesh(new THREE.CylinderGeometry(0.64, 0.64, 0.1, 10), woodMat);
+      tableTop.position.set(2.45, 1.58, 1.1);
+      const tableLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 0.74, 8), darkWoodMat);
+      tableLeg.position.set(2.45, 1.19, 1.1);
+      const mug = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.16, 8), pillowMat);
+      mug.position.set(2.35, 1.71, 1.05);
+      mug.userData.noCastShadow = true;
+      staticBatch.add(0.18, 0.24, 0.18, 2.6, 1.75, 1.22, glowWinMat);
+      cabin.add(tableTop, tableLeg, mug);
+    }
   }
 
-  // Interactive Indoor Supply Chest (matches collider [-3.5, -2.1, 1.35, 2.55])
+  // Interactive Indoor Supply Chest (2F houses at (-3.4, 2.2), 1F houses at (-2.75, 1.95))
   const chestGroup = new THREE.Group();
-  chestGroup.position.set(-2.75, 0.82, 1.95);
+  chestGroup.position.set(isTwoStory ? -3.4 : -2.75, 0.82, isTwoStory ? 2.2 : 1.95);
   chestGroup.rotation.y = Math.PI * 0.5;
   const chestBase = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.58, 0.78), woodMat);
   chestBase.position.y = 0.29;
@@ -3557,72 +3990,77 @@ export function buildCabin(textures: ProceduralTextures, style: CabinStyle = 'hu
   chestLock.userData.noCastShadow = true;
   chestGroup.add(chestBase, chestBand, indoorChestLid, chestLock);
 
-  // Hearth light position stored on hearthLight (NOT added directly to scene to avoid 14+ active PointLights!)
-  cabin.add(rug, rugTrim, hearthFlame, chestGroup);
+  cabin.add(hearthFlame, chestGroup);
+  staticBatch.flushInto(cabin);
 
-  // 4. Cutaway Roof Group — FIXED slope angles (negative X on back -Z slope, positive X on front +Z slope) so roofs pitch properly outward!
-  const roofBaseY = isTall ? 4.82 : 4.32;
-  const peakHeight = isTall ? 2.65 : 2.25;
+  // 4. Cutaway Roof Group
+  const roofBaseY = isTwoStory ? 7.72 : isTall ? 4.82 : 4.32;
+  const peakHeight = isTwoStory ? 2.85 : isTall ? 2.65 : 2.25;
+  const gableHalf = isTwoStory ? halfD + 0.08 : 3.25;
+  const gableDepth = isTwoStory ? halfW * 2 + 0.28 : 7.82;
   const gableShape = new THREE.Shape();
-  gableShape.moveTo(-3.25, 0);
-  gableShape.lineTo(3.25, 0);
+  gableShape.moveTo(-gableHalf, 0);
+  gableShape.lineTo(gableHalf, 0);
   gableShape.lineTo(0, peakHeight);
   gableShape.closePath();
-  const gableGeo = new THREE.ExtrudeGeometry(gableShape, { depth: 7.82, bevelEnabled: false });
+  const gableGeo = new THREE.ExtrudeGeometry(gableShape, { depth: gableDepth, bevelEnabled: false });
   gableGeo.rotateY(Math.PI * 0.5);
-  gableGeo.translate(-3.91, roofBaseY, 0);
+  gableGeo.translate(-gableDepth * 0.5, roofBaseY, 0);
   const gableMesh = new THREE.Mesh(gableGeo, logMat);
 
-  const pitchAngle = Math.atan2(peakHeight, 3.25);
+  const pitchAngle = Math.atan2(peakHeight, gableHalf);
 
-  if (style === 'watchtower' || style === 'townhall') {
-    const roofSlopeL = new THREE.Mesh(new THREE.BoxGeometry(9.2, 0.24, 5.1), roofMat);
-    roofSlopeL.position.set(0, roofBaseY + 1.05, -1.68);
-    roofSlopeL.rotation.x = -pitchAngle;
-    const roofSlopeR = new THREE.Mesh(new THREE.BoxGeometry(9.2, 0.24, 5.1), roofMat);
-    roofSlopeR.position.set(0, roofBaseY + 1.05, 1.68);
-    roofSlopeR.rotation.x = pitchAngle;
-    const ridge = new THREE.Mesh(new THREE.BoxGeometry(9.3, 0.28, 0.38), roofMat);
-    ridge.position.set(0, roofBaseY + peakHeight - 0.05, 0);
-    const towerCap = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.8, 2.1), stoneMat);
-    towerCap.position.set(0, roofBaseY + 3.2, -1.2);
+  if (isTwoStory) {
+    const roofW = halfW * 2 + 1.8;
+    const slopeDepth = Math.hypot(gableHalf + 0.9, peakHeight);
+    roofBatch.add(roofW, 0.26, slopeDepth, 0, roofBaseY + peakHeight * 0.48, -gableHalf * 0.54, roofMat, -pitchAngle);
+    roofBatch.add(roofW, 0.26, slopeDepth, 0, roofBaseY + peakHeight * 0.48, gableHalf * 0.54, roofMat, pitchAngle);
+    roofBatch.add(roofW + 0.2, 0.3, 0.42, 0, roofBaseY + peakHeight - 0.04, 0, roofMat);
+    roofBatch.add(1.22, 4.1, 1.22, -0.35, roofBaseY + 1.5, -halfD + 0.55, stoneMat);
+    roofBatch.add(4.8, 0.18, 2.0, 0, 3.85, halfD + 0.92, roofMat, 0.2);
+    if (style === 'watchkeep_2f') {
+      roofBatch.add(2.3, 1.9, 2.3, 2.4, roofBaseY + 2.8, -1.6, stoneMat);
+      const spire = new THREE.Mesh(new THREE.ConeGeometry(1.75, 2.5, 4), roofMat);
+      spire.rotation.y = Math.PI * 0.25;
+      spire.position.set(2.4, roofBaseY + 4.95, -1.6);
+      roofGroup.add(spire);
+    }
+    roofGroup.add(gableMesh);
+  } else if (style === 'watchtower' || style === 'townhall') {
+    roofBatch.add(9.2, 0.24, 5.1, 0, roofBaseY + 1.05, -1.68, roofMat, -pitchAngle);
+    roofBatch.add(9.2, 0.24, 5.1, 0, roofBaseY + 1.05, 1.68, roofMat, pitchAngle);
+    roofBatch.add(9.3, 0.28, 0.38, 0, roofBaseY + peakHeight - 0.05, 0, roofMat);
+    roofBatch.add(2.1, 1.8, 2.1, 0, roofBaseY + 3.2, -1.2, stoneMat);
     const spire = new THREE.Mesh(new THREE.ConeGeometry(1.55, 2.3, 4), roofMat);
     spire.rotation.y = Math.PI * 0.25;
     spire.position.set(0, roofBaseY + 5.1, -1.2);
-    const porchAwning = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.16, 2.0), roofMat);
-    porchAwning.position.set(0, 4.18, CABIN_HALF_D + 0.92);
-    porchAwning.rotation.x = 0.2;
-    roofGroup.add(roofSlopeL, roofSlopeR, porchAwning, ridge, gableMesh, towerCap, spire);
+    roofBatch.add(4.8, 0.16, 2.0, 0, 4.18, halfD + 0.92, roofMat, 0.2);
+    roofGroup.add(gableMesh, spire);
   } else {
-    const roofSlopeL = new THREE.Mesh(new THREE.BoxGeometry(9.1, 0.24, 4.8), roofMat);
-    roofSlopeL.position.set(0, roofBaseY + 0.88, -1.68);
-    roofSlopeL.rotation.x = -pitchAngle;
-    const roofSlopeR = new THREE.Mesh(new THREE.BoxGeometry(9.1, 0.24, 4.8), roofMat);
-    roofSlopeR.position.set(0, roofBaseY + 0.88, 1.68);
-    roofSlopeR.rotation.x = pitchAngle;
-    const ridge = new THREE.Mesh(new THREE.BoxGeometry(9.2, 0.28, 0.38), roofMat);
-    ridge.position.set(0, roofBaseY + peakHeight - 0.06, 0);
-    const porchAwning = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.18, 2.0), roofMat);
-    porchAwning.position.set(0, 3.82, CABIN_HALF_D + 0.92);
-    porchAwning.rotation.x = 0.2;
-    const chimney = new THREE.Mesh(new THREE.BoxGeometry(1.08, 3.3, 1.08), stoneMat);
-    chimney.position.set(style === 'cottage' || style === 'bakery' ? -1.8 : 0, 5.95, -2.55);
-    roofGroup.add(roofSlopeL, roofSlopeR, porchAwning, ridge, gableMesh, chimney);
+    roofBatch.add(9.1, 0.24, 4.8, 0, roofBaseY + 0.88, -1.68, roofMat, -pitchAngle);
+    roofBatch.add(9.1, 0.24, 4.8, 0, roofBaseY + 0.88, 1.68, roofMat, pitchAngle);
+    roofBatch.add(9.2, 0.28, 0.38, 0, roofBaseY + peakHeight - 0.06, 0, roofMat);
+    roofBatch.add(4.8, 0.18, 2.0, 0, 3.82, halfD + 0.92, roofMat, 0.2);
+    roofBatch.add(1.08, 3.3, 1.08, style === 'cottage' || style === 'bakery' ? -1.8 : 0, 5.95, -2.55, stoneMat);
+    roofGroup.add(gableMesh);
 
     if (style === 'shop' || style === 'bakery') {
       for (let s = -2; s <= 2; s++) {
-        const stripe = new THREE.Mesh(
-          new THREE.BoxGeometry(0.74, 0.19, 2.04),
+        roofBatch.add(
+          0.74,
+          0.19,
+          2.04,
+          s * 0.92,
+          3.84,
+          halfD + 0.92,
           s % 2 === 0 ? stripeAccentMat : creamStripeMat,
+          0.2,
         );
-        stripe.position.set(s * 0.92, 3.84, CABIN_HALF_D + 0.92);
-        stripe.rotation.x = 0.2;
-        stripe.userData.noCastShadow = true;
-        roofGroup.add(stripe);
       }
     }
   }
 
+  roofBatch.flushInto(roofGroup);
   cabin.add(roofGroup);
 
   cabin.traverse((obj) => {
@@ -3991,6 +4429,240 @@ export function buildCaveStructure(textures: ProceduralTextures, site: CaveSite)
   );
 
   return { group, torchLights, torchFlames, crystalMeshes, lightAnchors };
+}
+
+export interface DungeonVisual {
+  group: THREE.Group;
+  crystalMeshes: THREE.Mesh[];
+  flameMeshes: THREE.Mesh[];
+}
+
+interface DungeonMatSet {
+  wallMat: THREE.MeshStandardMaterial;
+  trimMat: THREE.MeshStandardMaterial;
+  floorMat: THREE.MeshStandardMaterial;
+  accentMat: THREE.MeshStandardMaterial;
+  crystalMat: THREE.MeshStandardMaterial;
+  flameMat: THREE.MeshStandardMaterial;
+  ironMat: THREE.MeshStandardMaterial;
+}
+
+const dungeonMatCache = new WeakMap<ProceduralTextures, Map<DungeonSite['style'], DungeonMatSet>>();
+
+function getDungeonMaterials(textures: ProceduralTextures, style: DungeonSite['style']): DungeonMatSet {
+  let byStyle = dungeonMatCache.get(textures);
+  if (!byStyle) {
+    byStyle = new Map();
+    dungeonMatCache.set(textures, byStyle);
+  }
+  const existing = byStyle.get(style);
+  if (existing) return existing;
+
+  const isPyramid = style === 'pyramid';
+  const isFrost = style === 'frost_bastion';
+  const isObsidian = style === 'obsidian_shrine';
+  const isCrypt = style === 'crypt';
+
+  const wallMat = new THREE.MeshStandardMaterial({
+    map: isPyramid
+      ? textures.sandBankTile
+      : isObsidian
+        ? textures.minecraftDeepslate
+        : isCrypt
+          ? textures.minecraftCobble
+          : textures.stoneBlock,
+    color: isFrost ? 0xdbeafe : isObsidian ? 0x312e81 : isPyramid ? 0xfde68a : 0xffffff,
+    roughness: isFrost ? 0.45 : 0.88,
+    metalness: isObsidian ? 0.2 : 0.06,
+  });
+
+  const trimMat = new THREE.MeshStandardMaterial({
+    map: isPyramid ? textures.stoneBlock : textures.minecraftDeepslate,
+    color: isPyramid ? 0xf59e0b : isFrost ? 0x60a5fa : isObsidian ? 0x991b1b : isCrypt ? 0x4c1d95 : 0x64748b,
+    roughness: 0.72,
+    metalness: 0.18,
+  });
+
+  const floorMat = new THREE.MeshStandardMaterial({
+    map: isPyramid ? textures.sandBankTile : textures.plazaCobble,
+    color: isFrost ? 0xbfdbfe : isObsidian ? 0x1e1b4b : 0xd1d5db,
+    roughness: 0.85,
+  });
+
+  const accentColor = isPyramid
+    ? 0xfbbf24
+    : isFrost
+      ? 0x38bdf8
+      : isObsidian
+        ? 0xf43f5e
+        : isCrypt
+          ? 0xa855f7
+          : 0x10b981;
+
+  const accentMat = new THREE.MeshStandardMaterial({
+    color: accentColor,
+    roughness: 0.55,
+    metalness: 0.35,
+  });
+
+  const crystalMat = new THREE.MeshStandardMaterial({
+    color: accentColor,
+    emissive: accentColor,
+    emissiveIntensity: 1.55,
+    roughness: 0.2,
+  });
+
+  const flameMat = new THREE.MeshStandardMaterial({
+    color: isFrost ? 0x7dd3fc : 0xfbbf24,
+    emissive: isFrost ? 0x0284c7 : isCrypt ? 0x9333ea : 0xea580c,
+    emissiveIntensity: 2.3,
+    roughness: 0.2,
+  });
+
+  const ironMat = new THREE.MeshStandardMaterial({
+    color: 0x334155,
+    metalness: 0.8,
+    roughness: 0.35,
+  });
+
+  const set: DungeonMatSet = { wallMat, trimMat, floorMat, accentMat, crystalMat, flameMat, ironMat };
+  byStyle.set(style, set);
+  return set;
+}
+
+export function buildDungeonStructure(textures: ProceduralTextures, site: DungeonSite): DungeonVisual {
+  const group = new THREE.Group();
+  const crystalMeshes: THREE.Mesh[] = [];
+  const flameMeshes: THREE.Mesh[] = [];
+  const { wallMat, trimMat, floorMat, accentMat, crystalMat, flameMat, ironMat } = getDungeonMaterials(
+    textures,
+    site.style,
+  );
+  const batch = new StaticBoxBatcher();
+
+  // 1. Deep Stone Plinth (-2.2..0.0) & Interior Dungeon Floor (top at y = 0)
+  batch.add(17.2, 2.0, 17.2, 0, -1.2, 0, trimMat);
+  batch.add(16.4, 0.42, 16.4, 0, -0.21, 0, floorMat);
+
+  // Entry stairs on +Z leading from terrain to dungeon doorway (z = 8.4..10.2)
+  batch.add(4.8, 0.3, 1.0, 0, -0.15, 8.7, floorMat);
+  batch.add(4.8, 0.45, 1.0, 0, -0.35, 9.6, trimMat);
+
+  // Central Raised Altar Platform matching walkableHeightAt ([-2.2..2.2], top at y = +0.55)
+  batch.add(4.4, 0.55, 4.4, 0, 0.275, 0, trimMat);
+  batch.add(4.6, 0.16, 4.6, 0, 0.08, 0, accentMat);
+
+  // 2. Perimeter Fortified Walls (matching DUNGEON_WALL_BOXES exact footprints)
+  const wallH = 5.4;
+  batch.add(1.0, wallH, 16.4, -7.7, wallH * 0.5, 0, wallMat);
+  batch.add(1.0, wallH, 16.4, 7.7, wallH * 0.5, 0, wallMat);
+  batch.add(16.4, wallH, 1.0, 0, wallH * 0.5, -7.7, wallMat);
+  batch.add(6.0, wallH, 1.0, -5.2, wallH * 0.5, 7.7, wallMat);
+  batch.add(6.0, wallH, 1.0, 5.2, wallH * 0.5, 7.7, wallMat);
+  // Portal arch lintel & doorway jambs
+  batch.add(4.6, 1.45, 1.25, 0, 4.68, 7.7, trimMat);
+  batch.add(0.55, 4.1, 1.35, -2.3, 2.05, 7.7, trimMat);
+  batch.add(0.55, 4.1, 1.35, 2.3, 2.05, 7.7, trimMat);
+  batch.add(2.4, 0.45, 1.45, 0, 5.6, 7.7, accentMat);
+
+  // Corner Bastion Buttresses
+  for (const bx of [-7.85, 7.85]) {
+    for (const bz of [-7.85, 7.85]) {
+      batch.add(1.6, wallH + 1.1, 1.6, bx, (wallH + 1.1) * 0.5, bz, trimMat);
+      batch.add(1.85, 0.45, 1.85, bx, wallH + 1.25, bz, accentMat);
+    }
+  }
+
+  // 4 Interior Pillars matching DUNGEON_WALL_BOXES ([±3.5..±4.8])
+  for (const px of [-4.15, 4.15]) {
+    for (const pz of [-4.15, 4.15]) {
+      batch.add(1.3, 5.2, 1.3, px, 2.6, pz, wallMat);
+      batch.add(1.55, 0.42, 1.55, px, 0.21, pz, trimMat);
+      batch.add(1.55, 0.42, 1.55, px, 5.0, pz, trimMat);
+    }
+  }
+
+  // 3. Style-specific Roof Crown / Stepped Pyramid / Battlements
+  if (site.style === 'pyramid') {
+    batch.add(16.6, 0.8, 16.6, 0, 5.8, 0, wallMat);
+    batch.add(13.2, 1.2, 13.2, 0, 6.8, 0, wallMat);
+    batch.add(9.4, 1.3, 9.4, 0, 8.05, 0, trimMat);
+    batch.add(5.6, 1.4, 5.6, 0, 9.4, 0, wallMat);
+    batch.add(2.4, 1.5, 2.4, 0, 10.85, 0, accentMat);
+  } else {
+    // Open courtyard roof beams + battlements around parapet so sky/lighting breathes cleanly inside
+    batch.add(16.4, 0.55, 1.4, 0, 5.5, -7.7, trimMat);
+    batch.add(1.4, 0.55, 16.4, -7.7, 5.5, 0, trimMat);
+    batch.add(1.4, 0.55, 16.4, 7.7, 5.5, 0, trimMat);
+    batch.add(16.4, 0.55, 1.4, 0, 5.5, 7.7, trimMat);
+    // Cross ceiling rafters at y = 5.35
+    batch.add(14.8, 0.48, 0.65, 0, 5.35, -3.5, trimMat);
+    batch.add(14.8, 0.48, 0.65, 0, 5.35, 3.5, trimMat);
+    batch.add(0.65, 0.48, 14.8, -4.15, 5.35, 0, trimMat);
+    batch.add(0.65, 0.48, 14.8, 4.15, 5.35, 0, trimMat);
+
+    // Parapet crenelations
+    for (let m = -6; m <= 6; m += 3) {
+      batch.add(1.1, 0.9, 1.1, m, 6.15, -7.7, wallMat);
+      batch.add(1.1, 0.9, 1.1, -7.7, 6.15, m, wallMat);
+      batch.add(1.1, 0.9, 1.1, 7.7, 6.15, m, wallMat);
+      if (Math.abs(m) >= 3) {
+        batch.add(1.1, 0.9, 1.1, m, 6.15, 7.7, wallMat);
+      }
+    }
+
+    if (site.style === 'frost_bastion' || site.style === 'obsidian_shrine') {
+      for (const bx of [-7.85, 7.85]) {
+        for (const bz of [-7.85, 7.85]) {
+          batch.add(0.9, 1.8, 0.9, bx, wallH + 2.35, bz, accentMat);
+        }
+      }
+    }
+  }
+
+  // Iron brazier stands beside entrance & interior corners
+  const brazierCoords: [number, number, number][] = [
+    [-2.75, 0.0, 8.75],
+    [2.75, 0.0, 8.75],
+    [-4.15, 0.0, -2.5],
+    [4.15, 0.0, -2.5],
+  ];
+  for (const [fx, fy, fz] of brazierCoords) {
+    batch.add(0.55, 1.05, 0.55, fx, fy + 0.52, fz, ironMat);
+    batch.add(0.75, 0.22, 0.75, fx, fy + 1.12, fz, accentMat);
+    const flame = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.56, 0.42), flameMat);
+    flame.position.set(fx, fy + 1.48, fz);
+    flame.userData.noCastShadow = true;
+    flameMeshes.push(flame);
+    group.add(flame);
+  }
+
+  // Animated Crystal Obelisks flanking the interior altar
+  for (const [cx, cz] of [
+    [-5.8, -5.8],
+    [5.8, -5.8],
+    [0, 5.35],
+  ]) {
+    if (cx !== 0) {
+      batch.add(0.95, 0.7, 0.95, cx, 0.35, cz, trimMat);
+    }
+    const crys = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.96, 0.48), crystalMat);
+    crys.position.set(cx, cx === 0 ? 6.45 : 1.35, cz === 5.35 ? 7.7 : cz);
+    crys.userData.noCastShadow = true;
+    crystalMeshes.push(crys);
+    group.add(crys);
+  }
+
+  batch.flushInto(group);
+
+  group.traverse((obj) => {
+    if ((obj as THREE.Mesh).isMesh) {
+      obj.castShadow = !obj.userData.noCastShadow;
+      obj.receiveShadow = true;
+    }
+  });
+
+  return { group, crystalMeshes, flameMeshes };
 }
 
 export function buildArchedBridge(textures: ProceduralTextures): THREE.Group {

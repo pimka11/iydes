@@ -27,6 +27,7 @@ import {
   CRAFT_RECIPES,
   GameHudState,
   GameMode,
+  LanguageCode,
   MerchantKind,
   QUESTS,
   RELIC_SKILLS,
@@ -38,6 +39,7 @@ import {
   WeaponId,
   WEAPONS,
 } from '../types';
+import { getGameModeLabel, getUiStrings } from '../i18n';
 
 export type ModalTab = 'inventory' | 'craft' | 'shop' | 'quests';
 type InventoryFilter = 'all' | 'weapons' | 'potions' | 'resources' | 'relics';
@@ -45,6 +47,7 @@ type CraftFilter = 'all' | 'weapon' | 'relic' | 'consumable' | 'building' | 'upg
 
 interface InventoryCraftModalProps {
   open: boolean;
+  language?: LanguageCode;
   tab: ModalTab;
   onTabChange: (tab: ModalTab) => void;
   activeMerchant: MerchantKind;
@@ -147,6 +150,7 @@ const MERCHANTS: { id: MerchantKind; label: string; title: string; greet: string
 
 const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
   open,
+  language,
   tab,
   onTabChange,
   activeMerchant,
@@ -160,12 +164,29 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
   onSelectWeapon,
   onPlaceWorkbench,
 }) => {
+  const s = getUiStrings(language);
   const [invFilter, setInvFilter] = useState<InventoryFilter>('all');
   const [craftFilter, setCraftFilter] = useState<CraftFilter>('all');
   const [potionSearch, setPotionSearch] = useState('');
   const [onlyOwnedPotions, setOnlyOwnedPotions] = useState(false);
 
   if (!open) return null;
+
+  const inventoryFilters: { id: InventoryFilter; label: string }[] = [
+    { id: 'all', label: s.filterAll },
+    { id: 'weapons', label: s.filterWeapons },
+    { id: 'potions', label: s.filterPotions },
+    { id: 'resources', label: s.filterResources },
+    { id: 'relics', label: s.filterRelics },
+  ];
+  const craftFilters: { id: CraftFilter; label: string }[] = [
+    { id: 'all', label: s.filterAllRecipes },
+    { id: 'weapon', label: s.filterCraftWeapons },
+    { id: 'relic', label: s.filterCraftRelics },
+    { id: 'consumable', label: s.filterCraftPotions },
+    { id: 'building', label: s.filterCraftBuilding },
+    { id: 'upgrade', label: s.filterCraftUpgrades },
+  ];
 
   const resourceNameMap = Object.fromEntries(RESOURCES.map((r) => [r.id, r])) as Record<
     ResourceId,
@@ -220,7 +241,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
               }`}
             >
               <Backpack className="h-4 w-4" />
-              <span>Інвентар (I)</span>
+              <span>{s.tabInventory}</span>
             </button>
             <button
               type="button"
@@ -236,7 +257,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
               }`}
             >
               <Hammer className="h-4 w-4" />
-              <span>Крафт (K)</span>
+              <span>{s.tabCraft}</span>
             </button>
             <button
               type="button"
@@ -252,7 +273,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
               }`}
             >
               <Store className="h-4 w-4" />
-              <span>Купці (M)</span>
+              <span>{s.tabShop}</span>
             </button>
             <button
               type="button"
@@ -268,13 +289,13 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
               }`}
             >
               <ScrollText className="h-4 w-4" />
-              <span>Квести ({completedQuestsCount}/{QUESTS.length})</span>
+              <span>{s.tabQuests} ({completedQuestsCount}/{QUESTS.length})</span>
             </button>
           </div>
 
           <div className="flex items-center gap-2">
             <span className={`rounded-lg border px-2 py-1 text-[11px] font-bold ${modeMeta.tone}`}>
-              {modeMeta.label}
+              {getGameModeLabel(language, hud.gameMode).full}
             </span>
             <span className="font-mono-nums flex items-center gap-1 rounded-lg border border-amber-500/40 bg-amber-500/15 px-2.5 py-1 text-xs font-bold text-amber-700 dark:text-amber-300">
               <Coins className="h-3.5 w-3.5" />
@@ -287,7 +308,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
                 e.currentTarget.blur();
                 onClose();
               }}
-              title="Закрити (Esc)"
+              title={`${s.closeLabel} (Esc)`}
               className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white"
             >
               <X className="h-4 w-4" />
@@ -352,7 +373,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
 
               {/* Category Filter Tabs */}
               <div className="flex flex-wrap gap-1 border-b border-slate-200 dark:border-white/10 pb-2">
-                {INVENTORY_FILTERS.map((f) => {
+                {inventoryFilters.map((f) => {
                   const active = invFilter === f.id;
                   return (
                     <button
@@ -446,7 +467,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
                                   : 'border border-slate-300 dark:border-white/15 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 hover:bg-slate-200 dark:hover:bg-slate-700'
                               }`}
                             >
-                              {equipped ? 'У руках' : 'Взяти'}
+                              {equipped ? s.btnEquipped : s.btnEquip}
                             </button>
                           ) : (
                             <button
@@ -458,7 +479,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
                               }}
                               className="shrink-0 rounded-lg border border-amber-500/45 bg-amber-500/15 px-2.5 py-1.5 text-[11px] font-bold text-amber-800 dark:text-amber-300 hover:bg-amber-500/25"
                             >
-                              Крафт
+                              {s.craftBtn}
                             </button>
                           )}
                         </div>
@@ -482,7 +503,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
                           type="text"
                           value={potionSearch}
                           onChange={(e) => setPotionSearch(e.target.value)}
-                          placeholder="Пошук зілля..."
+                          placeholder={s.searchPotions}
                           className="w-36 sm:w-44 rounded-lg border border-slate-200 dark:border-white/15 bg-white dark:bg-slate-900 py-1 pr-2 pl-7 text-[11px] text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-sky-500 focus:outline-none"
                         />
                       </label>
@@ -499,7 +520,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
                             : 'border-slate-200 dark:border-white/15 bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-300'
                         }`}
                       >
-                        Лише наявні
+                        {s.onlyOwned}
                       </button>
                     </div>
                   </div>
@@ -536,7 +557,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
                           </div>
                           <div className="mt-3 flex items-center justify-between border-t border-slate-200/80 dark:border-white/8 pt-2">
                             <span className="font-mono-nums text-xs text-slate-600 dark:text-slate-300">
-                              Є: <strong className="text-slate-900 dark:text-white">{count}</strong>
+                              {s.btnOwned}: <strong className="text-slate-900 dark:text-white">{count}</strong>
                             </span>
                             <button
                               type="button"
@@ -552,7 +573,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
                                   : 'cursor-not-allowed border-slate-200 dark:border-white/5 bg-slate-100 dark:bg-slate-800/50 text-slate-400 dark:text-slate-500'
                               }`}
                             >
-                              {item.kind === 'food' ? 'З’їсти' : 'Випити'}
+                              {s.btnUse}
                             </button>
                           </div>
                         </div>
@@ -731,7 +752,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
 
               {/* Craft Filter Bar */}
               <div className="flex flex-wrap gap-1.5 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50/90 dark:bg-slate-900/60 p-1.5">
-                {CRAFT_FILTERS.map((cf) => {
+                {craftFilters.map((cf) => {
                   const active = craftFilter === cf.id;
                   return (
                     <button
@@ -836,7 +857,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
                               className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-sky-500/45 bg-sky-500/15 px-3.5 py-2 text-xs font-bold text-sky-800 hover:bg-sky-500/25 dark:text-sky-200"
                             >
                               <Check className="h-3.5 w-3.5" />
-                              <span>{weaponDef && hud.activeWeapon === weaponDef.id ? 'У руках' : 'Взяти'}</span>
+                              <span>{weaponDef && hud.activeWeapon === weaponDef.id ? s.btnEquipped : s.btnEquip}</span>
                             </button>
                           ) : (
                             <button
@@ -853,7 +874,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
                                   : 'cursor-not-allowed bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500'
                               }`}
                             >
-                              {needsBench ? 'До верстака' : 'Скувати'}
+                              {needsBench ? s.btnLocked : s.btnCraft}
                             </button>
                           )}
                         </div>
@@ -930,7 +951,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
                           {owned ? (
                             <span className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-3.5 py-2 text-xs font-bold text-emerald-800 dark:text-emerald-200">
                               <Check className="h-3.5 w-3.5" />
-                              <span>Відкрито</span>
+                              <span>{s.btnOwned}</span>
                             </span>
                           ) : (
                             <button
@@ -947,7 +968,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
                                   : 'cursor-not-allowed bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500'
                               }`}
                             >
-                              {needsBench ? 'До верстака' : 'Створити'}
+                              {needsBench ? s.btnLocked : s.btnCraft}
                             </button>
                           )}
                         </div>
@@ -1023,7 +1044,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
                         {owned ? (
                           <span className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-3.5 py-2 text-xs font-bold text-emerald-800 dark:text-emerald-200">
                             <Check className="h-3.5 w-3.5" />
-                            <span>Створено</span>
+                            <span>{s.btnOwned}</span>
                           </span>
                         ) : (
                           <button
@@ -1040,7 +1061,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
                                 : 'cursor-not-allowed bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500'
                             }`}
                           >
-                            {needsBench ? 'До верстака' : 'Змайструвати'}
+                            {needsBench ? s.btnLocked : s.btnCraft}
                           </button>
                         )}
                       </div>
@@ -1137,7 +1158,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
                               : 'cursor-not-allowed bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500'
                           }`}
                         >
-                          {needsBench ? 'До верстака' : 'Створити'}
+                          {needsBench ? s.btnLocked : s.btnCraft}
                         </button>
                       </div>
                     );
@@ -1206,7 +1227,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
                         {owned ? (
                           <span className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-3.5 py-2 text-xs font-bold text-emerald-800 dark:text-emerald-200">
                             <Check className="h-3.5 w-3.5" />
-                            <span>Створено</span>
+                            <span>{s.btnOwned}</span>
                           </span>
                         ) : (
                           <button
@@ -1223,7 +1244,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
                                 : 'cursor-not-allowed bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500'
                             }`}
                           >
-                            {needsBench ? 'До верстака' : 'Скувати'}
+                            {needsBench ? s.btnLocked : s.btnCraft}
                           </button>
                         )}
                       </div>
@@ -1263,7 +1284,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
                   {activeMerchantMeta.greet}
                 </div>
                 <span className="font-mono-nums font-extrabold text-amber-700 dark:text-amber-300">
-                  {isCreative ? 'Творчий режим: Вільно' : `Баланс: ${hud.coins} мон.`}
+                  {isCreative ? s.freeCreative : `${hud.coins} ${s.coinsShort}`}
                 </span>
               </div>
 
@@ -1288,7 +1309,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
                       {owned ? (
                         <span className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-3.5 py-2 text-xs font-bold text-emerald-800 dark:text-emerald-200">
                           <Check className="h-3.5 w-3.5" />
-                          <span>Куплено</span>
+                          <span>{s.btnOwned}</span>
                         </span>
                       ) : (
                         <button
@@ -1305,7 +1326,7 @@ const InventoryCraftModalInner: React.FC<InventoryCraftModalProps> = ({
                               : 'cursor-not-allowed bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500'
                           }`}
                         >
-                          {isCreative ? 'Взяти вільно' : `Купити · ${item.price} м`}
+                          {isCreative ? s.freeCreative : `${s.btnBuy} · ${item.price} ${s.coinsShort}`}
                         </button>
                       )}
                     </div>
@@ -1399,6 +1420,7 @@ export const InventoryCraftModal = React.memo(InventoryCraftModalInner, (prev, n
   if (!prev.open && !next.open) return true;
   return (
     prev.open === next.open &&
+    prev.language === next.language &&
     prev.tab === next.tab &&
     prev.activeMerchant === next.activeMerchant &&
     prev.hud === next.hud

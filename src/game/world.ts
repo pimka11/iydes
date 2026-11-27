@@ -14,6 +14,7 @@ import {
   buildCampfire,
   buildCaveStructure,
   buildCoinModel,
+  buildDungeonStructure,
   buildFinalBossArena,
   buildMobModel,
   buildPeacefulMobModel,
@@ -27,6 +28,7 @@ import {
   buildVillageWell,
   BuiltStructureVisual,
   CaveVisual,
+  DungeonVisual,
   ensurePlayerWeaponMesh,
   HIT_FLASH_MAT,
   MobVisual,
@@ -45,12 +47,12 @@ import {
   biomeAt,
   BiomeId,
   BRIDGE_Z,
-  CABIN_HALF_D,
   CABIN_ROT,
   CABIN_SITES,
   CabinSite,
   cabinBaseY,
   cabinFloorY,
+  cabinSecondFloorY,
   CAVE_CHAMBER_Z,
   CAVE_END_Z,
   CAVE_PORTAL_Z,
@@ -60,17 +62,24 @@ import {
   caveFloorYAt,
   caveHalfWidthAt,
   cavePathCenterX,
+  DUNGEON_SITES,
+  DungeonSite,
+  dungeonFloorY,
   FINAL_ARENA_X,
   FINAL_ARENA_Z,
   findInsideCabin,
   findInsideCave,
+  findInsideDungeon,
   fromCabinLocal,
   fromCaveLocal,
+  fromDungeonLocal,
+  getCabinDims,
   getZoneName,
   groundHeightAt,
   initializeWorldLayout,
   resolveCabinCollision,
   resolveCaveCollision,
+  resolveDungeonCollision,
   resolveWorldBounds,
   riverCenterX,
   riverHalfWidthAt,
@@ -214,6 +223,7 @@ interface MobEntity {
   wanderAngle: number;
   wanderTimer: number;
   caveId?: string;
+  dungeonId?: string;
   specialTimer?: number;
   slowTimer?: number;
   guardTimer?: number;
@@ -340,6 +350,11 @@ interface CaveMount {
   lightAnchors: { x: number; y: number; z: number; color: number; baseInt: number; radius: number }[];
 }
 
+interface DungeonMount {
+  site: DungeonSite;
+  visual: DungeonVisual;
+}
+
 interface ChestEntity {
   id: string;
   group: THREE.Group;
@@ -415,6 +430,7 @@ export class BlocklandWorld {
 
   private cabins: CabinMount[] = [];
   private caves: CaveMount[] = [];
+  private dungeons: DungeonMount[] = [];
   private shopPos: THREE.Vector3 | null = null;
   private bakeryPos: THREE.Vector3 | null = null;
   private alchemyPos: THREE.Vector3 | null = null;
@@ -433,6 +449,8 @@ export class BlocklandWorld {
   private clock = new THREE.Clock();
   private lastRenderMs = 0;
   private renderCount = 0;
+  private lastShadowPx = 99999;
+  private lastShadowPz = 99999;
   private currentFps = 60;
   private currentFrameMs = 16;
   private fpsSamples = 0;
@@ -442,7 +460,7 @@ export class BlocklandWorld {
   private graphicsSettings: GraphicsSettings = { ...DEFAULT_GRAPHICS_SETTINGS };
   private dofEnabled = false;
   private shadowUpscale = false;
-  private ecoMode = true;
+  private ecoMode = DEFAULT_GRAPHICS_SETTINGS.ecoMode;
   private autoFollowCam = false;
   private modalOpen = false;
   private pooledLights: THREE.PointLight[] = [];
@@ -765,6 +783,7 @@ export class BlocklandWorld {
             ...VILLAGE_SITES.map((v) => ({ x: v.x, z: v.z, kind: 'village' as const, label: v.name })),
             ...CABIN_SITES.map((c) => ({ x: c.x, z: c.z, kind: 'cabin' as const, label: c.name })),
             ...CAVE_SITES.map((cv) => ({ x: cv.x, z: cv.z, kind: 'cave' as const, label: cv.name })),
+            ...DUNGEON_SITES.map((d) => ({ x: d.x, z: d.z, kind: 'dungeon' as const, label: d.name })),
           ];
           this.cachedMinimapEntities = [];
         }
@@ -1291,8 +1310,9 @@ export class BlocklandWorld {
       this.syncBuildGrassExclusions();
     }
 
-    // Varied Architectural Houses across the 2048x4096 valley & random Village (double doors, fixed roofs)
+    // Varied Architectural Houses (1-story & 2-story) across the valley & Villages
     for (const site of CABIN_SITES) {
+      const dims = getCabinDims(site.style);
       const cabinVisual = buildCabin(this.textures, site.style);
       cabinVisual.group.position.set(site.x, cabinBaseY(site), site.z);
       cabinVisual.group.rotation.y = site.rot;
@@ -1303,9 +1323,13 @@ export class BlocklandWorld {
         cabinVisual.hearthFlame,
         cabinVisual.indoorChestLid,
       ]);
-      const indoorChestWorld = fromCabinLocal(-2.75, 1.95, site);
-      const doorWorld = fromCabinLocal(0, CABIN_HALF_D, site);
-      const hearthWorld = fromCabinLocal(0, -1.8, site);
+      const indoorChestWorld = fromCabinLocal(
+        dims.isTwoStory ? -3.4 : -2.75,
+        dims.isTwoStory ? 2.2 : 1.95,
+        site,
+      );
+      const doorWorld = fromCabinLocal(0, dims.halfD, site);
+      const hearthWorld = fromCabinLocal(dims.isTwoStory ? -0.35 : 0, dims.isTwoStory ? -3.3 : -1.8, site);
       const hearthWorldY = cabinBaseY(site) + 1.45;
       const isMerchantStyle =
         site.style === 'shop' || site.style === 'bakery' || site.style === 'alchemy';
@@ -1342,8 +1366,8 @@ export class BlocklandWorld {
           hearthWorldZ: hearthWorld.z,
         });
       } else {
-        const wbWorld = fromCabinLocal(-2.1, -0.65, site);
-        const bedWorld = fromCabinLocal(2.55, -2.15, site);
+        const wbWorld = fromCabinLocal(dims.isTwoStory ? -3.4 : -2.1, dims.isTwoStory ? -0.85 : -0.65, site);
+        const bedWorld = fromCabinLocal(dims.isTwoStory ? -3.3 : 2.55, dims.isTwoStory ? -2.78 : -2.15, site);
         this.cabins.push({
           site,
           group: cabinVisual.group,
@@ -1355,7 +1379,11 @@ export class BlocklandWorld {
           hearthLight: cabinVisual.hearthLight,
           hearthFlame: cabinVisual.hearthFlame,
           workbenchPos: new THREE.Vector3(wbWorld.x, cabinBaseY(site) + 0.82, wbWorld.z),
-          bedPos: new THREE.Vector3(bedWorld.x, cabinBaseY(site) + 0.65, bedWorld.z),
+          bedPos: new THREE.Vector3(
+            bedWorld.x,
+            dims.isTwoStory ? cabinSecondFloorY(site) : cabinBaseY(site) + 0.65,
+            bedWorld.z,
+          ),
           doorWorldX: doorWorld.x,
           doorWorldZ: doorWorld.z,
           hearthWorldX: hearthWorld.x,
@@ -1379,7 +1407,7 @@ export class BlocklandWorld {
         indoor: true,
       });
       if (site.id !== 'main') {
-        const porchChestPos = fromCabinLocal(5.2, 1.5, site);
+        const porchChestPos = fromCabinLocal(dims.halfW + 1.6, 1.5, site);
         this.createChest(`cabin_porch_${site.id}`, porchChestPos.x, porchChestPos.z, site.rot - 0.6);
       }
     }
@@ -1412,6 +1440,21 @@ export class BlocklandWorld {
       });
       const caveChestPos = fromCaveLocal(cavePathCenterX(-43.0) - 2.4, -43.0, site);
       this.createChest(`cave_${site.id}`, caveChestPos.x, caveChestPos.z, site.rot + 0.45);
+    }
+
+    // 34 Dungeons across biomes with altars, guardians & treasure chests
+    for (const dSite of DUNGEON_SITES) {
+      const dVisual = buildDungeonStructure(this.textures, dSite);
+      dVisual.group.position.set(dSite.x, dungeonFloorY(dSite), dSite.z);
+      dVisual.group.rotation.y = dSite.rot;
+      this.scene.add(dVisual.group);
+      this.freezeStaticHierarchy(dVisual.group, [
+        ...dVisual.crystalMeshes,
+        ...dVisual.flameMeshes,
+      ]);
+      this.dungeons.push({ site: dSite, visual: dVisual });
+      const altarChestPos = fromDungeonLocal(0, -0.4, dSite);
+      this.createChest(`dungeon_${dSite.id}`, altarChestPos.x, altarChestPos.z, dSite.rot);
     }
 
     // Village Center Wells & Plaza Campfires across all settlements
@@ -1509,6 +1552,7 @@ export class BlocklandWorld {
       ...VILLAGE_SITES.map((v) => ({ x: v.x, z: v.z, kind: 'village' as const, label: v.name })),
       ...CABIN_SITES.map((c) => ({ x: c.x, z: c.z, kind: 'cabin' as const, label: c.name })),
       ...CAVE_SITES.map((cv) => ({ x: cv.x, z: cv.z, kind: 'cave' as const, label: cv.name })),
+      ...DUNGEON_SITES.map((d) => ({ x: d.x, z: d.z, kind: 'dungeon' as const, label: d.name })),
     ];
 
     // Distant landmark sky beacons so players can locate the Village, Ruins Boss, & Final Citadel Boss
@@ -1668,7 +1712,7 @@ export class BlocklandWorld {
 
     this.shockwaveGeo.rotateX(-Math.PI / 2);
 
-    if (!this.isSoftwareGl) {
+    if (!this.isSoftwareGl && (this.dofEnabled || this.graphicsSettings.bloomEnabled)) {
       this.ensureComposer();
     } else {
       this.renderer.compile(this.scene, this.camera);
@@ -3614,7 +3658,12 @@ export class BlocklandWorld {
 
     // 3. Rest on cabin bed or player-built bed (full heal + stamina + save)
     if (
-      this.cabins.some((c) => c.bedPos && Math.hypot(this.px - c.bedPos.x, this.pz - c.bedPos.z) < 2.8) ||
+      this.cabins.some(
+        (c) =>
+          c.bedPos &&
+          Math.hypot(this.px - c.bedPos.x, this.pz - c.bedPos.z) < 2.8 &&
+          Math.abs(this.py - c.bedPos.y) < 1.9,
+      ) ||
       this.builtStructures.some(
         (b) =>
           b.kind === 'bed' &&
@@ -3759,12 +3808,13 @@ export class BlocklandWorld {
     this.emitHud();
   }
 
-  private spawnMobAt(kind: MobKind, x: number, z: number, caveId?: string) {
+  private spawnMobAt(kind: MobKind, x: number, z: number, caveId?: string, dungeonId?: string) {
     const def = MOB_DEFS[kind];
     const visual = buildMobModel(kind, this.textures);
-    const y = caveId
-      ? this.walkableHeightWithBuilds(x, z)
-      : this.walkableHeightWithBuilds(x, z, groundHeightAt(x, z));
+    const y =
+      caveId || dungeonId
+        ? this.walkableHeightWithBuilds(x, z)
+        : this.walkableHeightWithBuilds(x, z, groundHeightAt(x, z));
     visual.root.position.set(x, y, z);
     this.scene.add(visual.root);
 
@@ -3789,6 +3839,7 @@ export class BlocklandWorld {
       wanderAngle: Math.random() * Math.PI * 2,
       wanderTimer: 2 + Math.random() * 3,
       caveId,
+      dungeonId,
     });
   }
 
@@ -3810,6 +3861,11 @@ export class BlocklandWorld {
             ? 'crystal_golem'
             : 'skeleton';
       this.spawnMobAt(deepKind, deepPos.x, deepPos.z, cave.id);
+    }
+    for (const dSite of DUNGEON_SITES) {
+      if (this.mobs.some((m) => m.dungeonId === dSite.id)) continue;
+      const guardPos = fromDungeonLocal(0, 3.3, dSite);
+      this.spawnMobAt(dSite.guardianKind, guardPos.x, guardPos.z, undefined, dSite.id);
     }
   }
 
@@ -4469,7 +4525,10 @@ export class BlocklandWorld {
     }
 
     const inRiver = Math.abs(gx - riverCenterX(gz)) <= riverHalfWidthAt(gz) + 0.9;
-    const inPreset = findInsideCabin(gx, gz) !== null || findInsideCave(gx, gz) !== null;
+    const inPreset =
+      findInsideCabin(gx, gz) !== null ||
+      findInsideCave(gx, gz) !== null ||
+      findInsideDungeon(gx, gz) !== null;
     const duplicate = this.builtStructures.some(
       (b) =>
         b.kind === kind &&
@@ -5239,14 +5298,15 @@ export class BlocklandWorld {
     let [rx, rz] = resolveWorldBounds(x, z, radius);
 
     if (allowCabinInterior) {
-      [rx, rz] = resolveCabinCollision(rx, rz, radius);
+      [rx, rz] = resolveCabinCollision(rx, rz, radius, entityY);
     } else {
       for (let i = 0; i < CABIN_SITES.length; i++) {
         const site = CABIN_SITES[i];
-        if (Math.abs(rx - site.x) > 7.5 || Math.abs(rz - site.z) > 7.5) continue;
+        const dims = getCabinDims(site.style);
+        if (Math.abs(rx - site.x) > dims.halfW + 4.5 || Math.abs(rz - site.z) > dims.halfD + 4.5) continue;
         const { lx, lz } = toCabinLocal(rx, rz, site);
-        if (Math.abs(lx) < 4.8 && Math.abs(lz) < 4.2) {
-          const pushX = lx >= 0 ? 4.8 : -4.8;
+        if (Math.abs(lx) < dims.halfW + 1.25 && Math.abs(lz) < dims.halfD + 1.45) {
+          const pushX = lx >= 0 ? dims.halfW + 1.25 : -(dims.halfW + 1.25);
           const worldOut = fromCabinLocal(pushX, lz, site);
           rx = worldOut.x;
           rz = worldOut.z;
@@ -5255,6 +5315,7 @@ export class BlocklandWorld {
     }
 
     [rx, rz] = resolveCaveCollision(rx, rz, radius, entityY);
+    [rx, rz] = resolveDungeonCollision(rx, rz, radius);
 
     for (let i = 0; i < this.builtStructures.length; i++) {
       const b = this.builtStructures[i];
@@ -5383,9 +5444,14 @@ export class BlocklandWorld {
 
       this.renderCount++;
       if (!this.isSoftwareGl && this.renderer.shadowMap.enabled && this.sunLight.castShadow) {
-        const updateEvery = this.isMobile ? 3 : this.ecoMode ? 2 : 1;
-        if (updateEvery === 1 || this.renderCount % updateEvery === 1) {
+        const updateEvery = this.isMobile ? 4 : this.ecoMode ? 4 : 3;
+        const movedSq =
+          (this.px - this.lastShadowPx) * (this.px - this.lastShadowPx) +
+          (this.pz - this.lastShadowPz) * (this.pz - this.lastShadowPz);
+        if (this.renderCount % updateEvery === 1 || movedSq > 0.36) {
           this.renderer.shadowMap.needsUpdate = true;
+          this.lastShadowPx = this.px;
+          this.lastShadowPz = this.pz;
         }
       }
 
@@ -5624,6 +5690,27 @@ export class BlocklandWorld {
         cave.visual.crystalMeshes.forEach((cr, idx) => {
           cr.rotation.y += dt * 0.25 * (idx % 2 === 0 ? 1 : -1);
         });
+      }
+    }
+
+    for (let i = 0; i < this.dungeons.length; i++) {
+      const d = this.dungeons[i];
+      const dSq = (this.px - d.site.x) ** 2 + (this.pz - d.site.z) ** 2;
+      const visible = dSq < cabinCullSq;
+      d.visual.group.visible = visible;
+      if (!visible || dSq >= 68 * 68) continue;
+      for (let c = 0; c < d.visual.crystalMeshes.length; c++) {
+        const cr = d.visual.crystalMeshes[c];
+        cr.rotation.y += dt * (c % 2 === 0 ? 0.95 : -0.95);
+        cr.position.y += Math.sin(elapsed * 2.5 + c + i) * dt * 0.12;
+      }
+      for (let f = 0; f < d.visual.flameMeshes.length; f++) {
+        const fl = d.visual.flameMeshes[f];
+        fl.scale.set(
+          1 + Math.sin(elapsed * 13 + f + i) * 0.16,
+          1 + Math.cos(elapsed * 11 + f * 1.2 + i) * 0.22,
+          1 + Math.sin(elapsed * 13 + f + i) * 0.16,
+        );
       }
     }
 
@@ -6232,6 +6319,10 @@ export class BlocklandWorld {
 
     if (this.inWater) {
       rig.bodyTilt.rotation.x = THREE.MathUtils.damp(rig.bodyTilt.rotation.x, 0.55, 8, dt);
+      rig.torso.rotation.y = THREE.MathUtils.damp(rig.torso.rotation.y, 0, 10, dt);
+      rig.torso.scale.y = THREE.MathUtils.damp(rig.torso.scale.y, 1, 10, dt);
+      rig.head.rotation.y = THREE.MathUtils.damp(rig.head.rotation.y, Math.sin(elapsed * 2.1) * 0.08, 8, dt);
+      rig.head.rotation.x = THREE.MathUtils.damp(rig.head.rotation.x, -0.14, 8, dt);
       const paddle = Math.sin(elapsed * 6.5);
       rig.leftArm.rotation.x = -1.2 + paddle * 0.7;
       rig.leftArm.rotation.y = 0;
@@ -6239,20 +6330,51 @@ export class BlocklandWorld {
       rig.leftLeg.rotation.x = paddle * 0.55;
       rig.rightLeg.rotation.x = -paddle * 0.55;
     } else {
-      const lean = sprinting ? 0.14 : isGuarding ? 0.06 : 0;
+      const lean = !this.grounded
+        ? THREE.MathUtils.clamp(-this.pvy * 0.02, -0.18, 0.2)
+        : sprinting
+          ? 0.16
+          : isGuarding
+            ? 0.06
+            : 0;
       rig.bodyTilt.rotation.x = THREE.MathUtils.damp(rig.bodyTilt.rotation.x, lean, 10, dt);
+
+      // Torso breath & sprinting torso twist
+      const targetTorsoScaleY = speedHoriz < 0.4 && this.grounded ? 1 + Math.sin(elapsed * 2.6) * 0.022 : 1;
+      rig.torso.scale.y = THREE.MathUtils.damp(rig.torso.scale.y, targetTorsoScaleY, 10, dt);
+      const targetTorsoTwist =
+        speedHoriz > 0.4 && this.grounded ? Math.sin(this.walkPhase) * (sprinting ? 0.14 : 0.07) : 0;
+      rig.torso.rotation.y = THREE.MathUtils.damp(rig.torso.rotation.y, targetTorsoTwist, 12, dt);
+
+      // Expressive head look around when idle vs focused forward when moving
+      const targetHeadYaw = speedHoriz < 0.4 && this.grounded ? Math.sin(elapsed * 1.15) * 0.12 : 0;
+      const targetHeadPitch =
+        !this.grounded
+          ? THREE.MathUtils.clamp(-this.pvy * 0.025, -0.16, 0.18)
+          : speedHoriz < 0.4
+            ? Math.sin(elapsed * 1.8) * 0.04
+            : 0;
+      rig.head.rotation.y = THREE.MathUtils.damp(rig.head.rotation.y, targetHeadYaw, 8, dt);
+      rig.head.rotation.x = THREE.MathUtils.damp(rig.head.rotation.x, targetHeadPitch, 8, dt);
+
       const swing = speedHoriz > 0.4 && this.grounded ? Math.sin(this.walkPhase) * 0.78 : 0;
-      rig.leftLeg.rotation.x = THREE.MathUtils.damp(rig.leftLeg.rotation.x, swing, 16, dt);
-      rig.rightLeg.rotation.x = THREE.MathUtils.damp(rig.rightLeg.rotation.x, -swing, 16, dt);
+      const jumpLeg = !this.grounded ? THREE.MathUtils.clamp(this.pvy * 0.055, -0.52, 0.52) : 0;
+      rig.leftLeg.rotation.x = THREE.MathUtils.damp(rig.leftLeg.rotation.x, this.grounded ? swing : jumpLeg, 16, dt);
+      rig.rightLeg.rotation.x = THREE.MathUtils.damp(rig.rightLeg.rotation.x, this.grounded ? -swing : -jumpLeg * 0.8, 16, dt);
 
       if (isGuarding) {
         rig.leftArm.rotation.x = THREE.MathUtils.damp(rig.leftArm.rotation.x, -1.25, 18, dt);
         rig.leftArm.rotation.y = THREE.MathUtils.damp(rig.leftArm.rotation.y, 0.75, 18, dt);
         rig.leftArm.rotation.z = THREE.MathUtils.damp(rig.leftArm.rotation.z, -0.58, 18, dt);
-      } else {
-        rig.leftArm.rotation.x = THREE.MathUtils.damp(rig.leftArm.rotation.x, -swing * 0.85, 16, dt);
+      } else if (!this.grounded) {
+        rig.leftArm.rotation.x = THREE.MathUtils.damp(rig.leftArm.rotation.x, -0.55 - jumpLeg * 0.4, 14, dt);
         rig.leftArm.rotation.y = THREE.MathUtils.damp(rig.leftArm.rotation.y, 0, 14, dt);
-        rig.leftArm.rotation.z = THREE.MathUtils.damp(rig.leftArm.rotation.z, 0, 14, dt);
+        rig.leftArm.rotation.z = THREE.MathUtils.damp(rig.leftArm.rotation.z, 0.28, 14, dt);
+      } else {
+        const idleLeftArm = speedHoriz > 0.4 ? -swing * 0.85 : Math.sin(elapsed * 2.2) * 0.05;
+        rig.leftArm.rotation.x = THREE.MathUtils.damp(rig.leftArm.rotation.x, idleLeftArm, 16, dt);
+        rig.leftArm.rotation.y = THREE.MathUtils.damp(rig.leftArm.rotation.y, 0, 14, dt);
+        rig.leftArm.rotation.z = THREE.MathUtils.damp(rig.leftArm.rotation.z, 0.04 + Math.sin(elapsed * 2.2) * 0.02, 14, dt);
       }
     }
 
@@ -6275,14 +6397,21 @@ export class BlocklandWorld {
       }
     } else {
       const idleArm = isRangedWep
-        ? -1.25
+        ? -1.25 + Math.sin(elapsed * 2.5) * 0.04
         : this.inWater
           ? -1.2 - Math.sin(elapsed * 6.5) * 0.7
-          : speedHoriz > 0.4
-            ? Math.sin(this.walkPhase) * 0.65
-            : 0;
+          : !this.grounded
+            ? -0.5
+            : speedHoriz > 0.4
+              ? Math.sin(this.walkPhase) * 0.65
+              : Math.sin(elapsed * 2.2 + 1.1) * 0.06;
       rig.rightArm.rotation.x = THREE.MathUtils.damp(rig.rightArm.rotation.x, idleArm, 15, dt);
-      rig.rightArm.rotation.z = THREE.MathUtils.damp(rig.rightArm.rotation.z, 0, 15, dt);
+      rig.rightArm.rotation.z = THREE.MathUtils.damp(
+        rig.rightArm.rotation.z,
+        !this.grounded && !this.inWater ? -0.24 : -0.04,
+        15,
+        dt,
+      );
     }
 
     const aimX = Math.sin(this.playerYaw);
@@ -6694,6 +6823,11 @@ export class BlocklandWorld {
         if (m.visual.wingR) m.visual.wingR.rotation.z = -flap;
         if (m.visual.tail) m.visual.tail.rotation.x = Math.sin(elapsed * 4.5 + m.id) * 0.28;
         if (m.visual.head) m.visual.head.rotation.x = 0.08 + Math.sin(elapsed * 2.2 + m.id) * 0.08 - swingAmt * 0.25;
+        if (m.kind === 'ice_wraith' || m.kind === 'lava_imp') {
+          const flyerCast = m.attackTimer < 0.55 ? -0.75 * (1 - m.attackTimer / 0.55) : Math.sin(elapsed * 2.4 + m.id) * 0.1;
+          if (m.visual.leftArm) m.visual.leftArm.rotation.x = flyerCast * 0.65;
+          if (m.visual.rightArm) m.visual.rightArm.rotation.x = flyerCast;
+        }
       } else if (
         m.kind === 'wolf' ||
         m.kind === 'dire_boar' ||
@@ -6728,38 +6862,42 @@ export class BlocklandWorld {
         }
       } else {
         const sw = Math.sin(m.walkPhase) * Math.min(0.75, spd * 0.16);
+        const idleArm = Math.sin(elapsed * 2.3 + m.id) * 0.08;
+        const isCaster = m.kind === 'swamp_witch' || m.kind === 'skeleton';
+        const castLift = isCaster && m.attackTimer < 0.55 ? -0.75 * (1 - m.attackTimer / 0.55) : 0;
         if (m.visual.leftLeg) m.visual.leftLeg.rotation.x = sw;
         if (m.visual.rightLeg) m.visual.rightLeg.rotation.x = -sw;
         if (m.visual.leftArm) {
-          m.visual.leftArm.rotation.x = -sw * 0.8 - swingAmt * 0.45;
+          m.visual.leftArm.rotation.x = (spd > 0.2 ? -sw * 0.8 : idleArm) - swingAmt * 0.45 + castLift * 0.4;
         }
         if (m.visual.rightArm) {
           const swingBoost = isSwinging ? -1.45 * Math.max(0.4, swingAmt) : 0;
-          m.visual.rightArm.rotation.x = sw * 0.8 + swingBoost;
+          m.visual.rightArm.rotation.x = (spd > 0.2 ? sw * 0.8 : -idleArm) + swingBoost + castLift;
         }
         if (m.visual.head) {
-          m.visual.head.rotation.y = Math.sin(elapsed * 1.4 + m.id) * 0.12;
-          m.visual.head.rotation.x = swingAmt * 0.14;
+          m.visual.head.rotation.y = Math.sin(elapsed * 1.6 + m.id) * 0.18;
+          m.visual.head.rotation.x = swingAmt * 0.16 + Math.sin(elapsed * 2.2 + m.id) * 0.05;
         }
         if (m.visual.wingL) {
-          const wFlap = Math.sin(elapsed * 2.6 + m.id) * 0.18;
+          const wFlap = Math.sin(elapsed * 3.1 + m.id) * 0.24;
           m.visual.wingL.rotation.z = wFlap;
         }
         if (m.visual.wingR) {
-          const wFlap = Math.sin(elapsed * 2.6 + m.id) * 0.18;
+          const wFlap = Math.sin(elapsed * 3.1 + m.id) * 0.24;
           m.visual.wingR.rotation.z = -wFlap;
         }
         if (m.visual.tail) {
-          m.visual.tail.rotation.y = Math.sin(elapsed * 2.4 + m.id) * 0.24;
+          m.visual.tail.rotation.y = Math.sin(elapsed * 2.8 + m.id) * 0.28;
         }
       }
 
       if (m.visual.aura) {
-        m.visual.aura.rotation.y += stepDt * 1.65;
-        m.visual.aura.position.y += Math.sin(elapsed * 3.0 + m.id) * 0.002;
+        m.visual.aura.rotation.y += stepDt * 1.85;
+        m.visual.aura.position.y += Math.sin(elapsed * 3.0 + m.id) * 0.0025;
       }
       if (m.kind !== 'slime' && m.kind !== 'void_bat' && m.kind !== 'ice_wraith' && m.kind !== 'lava_imp') {
-        m.visual.body.scale.y = 1 + Math.sin(elapsed * 2.8 + m.id) * 0.02;
+        m.visual.body.scale.y = 1 + Math.sin(elapsed * 2.9 + m.id) * 0.025;
+        m.visual.body.rotation.x = spd > 1.5 ? 0.08 : 0;
       }
     }
   }
@@ -6770,7 +6908,13 @@ export class BlocklandWorld {
     const tx = this.px + Math.sin(angle) * dist;
     const tz = this.pz + Math.cos(angle) * dist;
     if (Math.hypot(tx - VILLAGE_SITE.x, tz - VILLAGE_SITE.z) < 55) return;
-    if (findInsideCabin(tx, tz) !== null || findInsideCave(tx, tz) !== null) return;
+    if (
+      findInsideCabin(tx, tz) !== null ||
+      findInsideCave(tx, tz) !== null ||
+      findInsideDungeon(tx, tz) !== null
+    ) {
+      return;
+    }
     const y = groundHeightAt(tx, tz);
     if (y < WATER_LEVEL + 0.3) return;
     const biome: BiomeId = biomeAt(tx, tz);
@@ -6871,8 +7015,17 @@ export class BlocklandWorld {
         pm.y = walkableHeightAt(pm.x, pm.z, pm.y);
         pm.visual.root.position.set(pm.x, pm.y, pm.z);
         pm.visual.root.rotation.y = pm.yaw;
+        pm.visual.body.scale.y = 1 + Math.sin(elapsed * 2.2 + pm.id) * 0.018;
         if (pm.visual.head) {
-          pm.visual.head.rotation.y = Math.sin(elapsed * 1.1 + pm.id) * 0.12;
+          pm.visual.head.rotation.y = Math.sin(elapsed * 1.2 + pm.id) * 0.14;
+          pm.visual.head.rotation.x = dSq < 6.5 * 6.5 ? Math.sin(elapsed * 2.4) * 0.06 : 0;
+        }
+        if (pm.visual.leftArm) {
+          pm.visual.leftArm.rotation.x = Math.sin(elapsed * 2.0 + pm.id) * 0.1;
+        }
+        if (pm.visual.rightArm) {
+          const wave = dSq < 6.5 * 6.5 ? -0.35 + Math.sin(elapsed * 4.2 + pm.id) * 0.18 : -Math.sin(elapsed * 2.0 + pm.id) * 0.1;
+          pm.visual.rightArm.rotation.x = THREE.MathUtils.damp(pm.visual.rightArm.rotation.x, wave, 8, dt);
         }
         continue;
       }
@@ -6946,9 +7099,17 @@ export class BlocklandWorld {
       if (pm.visual.legFR) pm.visual.legFR.rotation.x = -legSwing;
       if (pm.visual.legBL) pm.visual.legBL.rotation.x = -legSwing;
 
+      pm.visual.body.scale.y = 1 + Math.sin(elapsed * 2.6 + pm.id) * 0.02;
+      if (pm.visual.tail) {
+        const wagFreq = pm.fleeTimer > 0 ? 11 : 4.2;
+        pm.visual.tail.rotation.y = Math.sin(elapsed * wagFreq + pm.id) * 0.34;
+        pm.visual.tail.rotation.x = 0.22 + Math.cos(elapsed * 3.1 + pm.id) * 0.1;
+      }
+
       if (pm.visual.head) {
-        const targetHeadPitch = spd < 0.2 ? 0.32 + Math.sin(elapsed * 2.2 + pm.id) * 0.1 : 0;
+        const targetHeadPitch = spd < 0.2 ? 0.32 + Math.sin(elapsed * 2.2 + pm.id) * 0.12 : 0;
         pm.visual.head.rotation.x = THREE.MathUtils.damp(pm.visual.head.rotation.x, targetHeadPitch, 8, stepDt);
+        pm.visual.head.rotation.y = Math.sin(elapsed * 1.4 + pm.id) * 0.12;
       }
     }
   }
@@ -7345,7 +7506,7 @@ export class BlocklandWorld {
     });
     const nearBed =
       this.cabins.some((c) => {
-        if (!c.bedPos) return false;
+        if (!c.bedPos || Math.abs(this.py - c.bedPos.y) >= 1.9) return false;
         const dx = this.px - c.bedPos.x;
         const dz = this.pz - c.bedPos.z;
         return dx * dx + dz * dz < 2.8 * 2.8;

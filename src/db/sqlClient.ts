@@ -1,4 +1,4 @@
-import { GraphicsSettings, SaveGameData, ThemeMode } from '../game/types';
+import { GraphicsSettings, LanguageCode, SaveGameData, ThemeMode } from '../game/types';
 
 export interface SqlColumnMeta {
   cid?: number;
@@ -89,23 +89,27 @@ export async function fetchSqlSettings(): Promise<{
     const theme: ThemeMode = map.theme === 'light' ? 'light' : 'dark';
     const preset = (map.graphics_preset as GraphicsSettings['preset']) || 'high';
     const renderScale = Number(map.render_scale) || 1;
-    const shadowQuality = (map.shadow_quality as GraphicsSettings['shadowQuality']) || '2k';
-    const grassDensity = Number(map.grass_density) || 1;
+    const shadowQuality = (map.shadow_quality as GraphicsSettings['shadowQuality']) || '1k';
+    const grassDensity = Number(map.grass_density) || 0.75;
     const viewDistance = (map.view_distance as GraphicsSettings['viewDistance']) || 'far';
     const dofEnabled = map.dof_enabled === '1';
-    const bloomEnabled = map.bloom_enabled !== '0';
-    const ecoMode = map.eco_mode !== '0';
+    const bloomEnabled = map.bloom_enabled === '1';
+    const ecoMode = map.eco_mode === '1';
+    const rawLang = map.language;
+    const language: LanguageCode =
+      rawLang === 'en' || rawLang === 'es' || rawLang === 'pl' || rawLang === 'ru' ? rawLang : 'uk';
     return {
       theme,
       graphics: {
         preset,
         renderScale: ([0.65, 0.85, 1, 1.25].includes(renderScale) ? renderScale : 1) as GraphicsSettings['renderScale'],
         shadowQuality,
-        grassDensity: ([0.25, 0.5, 0.75, 1].includes(grassDensity) ? grassDensity : 1) as GraphicsSettings['grassDensity'],
+        grassDensity: ([0.25, 0.5, 0.75, 1].includes(grassDensity) ? grassDensity : 0.75) as GraphicsSettings['grassDensity'],
         viewDistance,
         dofEnabled,
         bloomEnabled,
         ecoMode,
+        language,
       },
     };
   } catch {
@@ -131,6 +135,7 @@ export async function pushSqlSettings(
         dof_enabled: graphics.dofEnabled ? '1' : '0',
         bloom_enabled: graphics.bloomEnabled ? '1' : '0',
         eco_mode: graphics.ecoMode ? '1' : '0',
+        language: graphics.language ?? 'uk',
       }),
     });
   } catch {

@@ -119,12 +119,13 @@ function ensureSchema(database: Database) {
     ['theme', 'dark'],
     ['graphics_preset', 'high'],
     ['render_scale', '1'],
-    ['shadow_quality', '2k'],
-    ['grass_density', '1'],
+    ['shadow_quality', '1k'],
+    ['grass_density', '0.75'],
     ['view_distance', 'far'],
     ['dof_enabled', '0'],
-    ['bloom_enabled', '1'],
-    ['eco_mode', '1'],
+    ['bloom_enabled', '0'],
+    ['eco_mode', '0'],
+    ['language', 'uk'],
     ['server_world_seed', '42069'],
     ['server_season', 'summer'],
     ['server_weather', 'clear'],
@@ -150,6 +151,29 @@ function ensureSchema(database: Database) {
     );
     database.run(
       `INSERT OR REPLACE INTO app_settings (setting_key, setting_value, updated_at) VALUES ('dof_v9_migrated', '1', ?)`,
+      [now],
+    );
+  }
+
+  // One-time v12 migration: unlock 130+ FPS by disabling default eco 60Hz cap & heavy Bloom pass on high preset
+  const fpsMigratedCheck = database.prepare(`SELECT setting_value FROM app_settings WHERE setting_key = 'fps130_v12_migrated'`);
+  const fpsAlreadyMigrated = fpsMigratedCheck.step();
+  fpsMigratedCheck.free();
+  if (!fpsAlreadyMigrated) {
+    for (const [k, v] of [
+      ['eco_mode', '0'],
+      ['bloom_enabled', '0'],
+      ['shadow_quality', '1k'],
+      ['grass_density', '0.75'],
+    ]) {
+      database.run(
+        `INSERT INTO app_settings (setting_key, setting_value, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = excluded.updated_at`,
+        [k, v, now],
+      );
+    }
+    database.run(
+      `INSERT OR REPLACE INTO app_settings (setting_key, setting_value, updated_at) VALUES ('fps130_v12_migrated', '1', ?)`,
       [now],
     );
   }

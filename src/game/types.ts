@@ -2651,6 +2651,7 @@ export interface MinimapEntity {
     | 'cabin'
     | 'village'
     | 'cave'
+    | 'dungeon'
     | 'mob'
     | 'boss'
     | 'npc'
@@ -2723,6 +2724,7 @@ export interface ActiveGoalHud {
 }
 
 export type ThemeMode = 'dark' | 'light';
+export type LanguageCode = 'uk' | 'en' | 'es' | 'pl' | 'ru';
 export type GraphicsPreset = 'low' | 'medium' | 'high' | 'ultra';
 export type ShadowQualitySetting = 'off' | '1k' | '2k' | '4k';
 export type ViewDistanceSetting = 'near' | 'medium' | 'far';
@@ -2736,17 +2738,19 @@ export interface GraphicsSettings {
   dofEnabled: boolean;
   bloomEnabled: boolean;
   ecoMode: boolean;
+  language?: LanguageCode;
 }
 
 export const DEFAULT_GRAPHICS_SETTINGS: GraphicsSettings = {
   preset: 'high',
   renderScale: 1,
-  shadowQuality: '2k',
-  grassDensity: 1,
+  shadowQuality: '1k',
+  grassDensity: 0.75,
   viewDistance: 'far',
   dofEnabled: false,
-  bloomEnabled: true,
-  ecoMode: true,
+  bloomEnabled: false,
+  ecoMode: false,
+  language: 'uk',
 };
 
 export interface GameHudState {

@@ -29,7 +29,28 @@ export type CabinStyle =
   | 'bakery'
   | 'alchemy'
   | 'townhall'
-  | 'tavern';
+  | 'tavern'
+  | 'manor_2f'
+  | 'tavern_2f'
+  | 'watchkeep_2f';
+
+export function isTwoStoryCabin(style: CabinStyle): boolean {
+  return style === 'manor_2f' || style === 'tavern_2f' || style === 'watchkeep_2f';
+}
+
+export function getCabinDims(style: CabinStyle): { halfW: number; halfD: number; isTwoStory: boolean } {
+  if (isTwoStoryCabin(style)) {
+    return { halfW: 4.8, halfD: 4.0, isTwoStory: true };
+  }
+  return { halfW: CABIN_HALF_W, halfD: CABIN_HALF_D, isTwoStory: false };
+}
+
+export type DungeonStyle =
+  | 'crypt'
+  | 'pyramid'
+  | 'frost_bastion'
+  | 'obsidian_shrine'
+  | 'stone_keep';
 
 export type BiomeId =
   | 'meadow'
@@ -55,6 +76,23 @@ export interface CabinSite {
   rot: number;
   style: CabinStyle;
   isVillage?: boolean;
+}
+
+export interface DungeonSite {
+  id: string;
+  name: string;
+  x: number;
+  z: number;
+  rot: number;
+  style: DungeonStyle;
+  guardianKind:
+    | 'skeleton'
+    | 'cursed_knight'
+    | 'sand_mummy'
+    | 'frost_yeti'
+    | 'lava_imp'
+    | 'boss';
+  tier: number;
 }
 
 export interface VillageSite {
@@ -168,9 +206,111 @@ const BASE_CABIN_SITES: CabinSite[] = [
   { id: 'rural_ne_sanctuary', name: 'Святилище Східних Вершин', x: 3220, z: -4480, rot: -0.8, style: 'alchemy' },
   { id: 'rural_sw_port', name: 'Південно-Західна Таверна', x: -3180, z: 4680, rot: 1.7, style: 'tavern' },
   { id: 'rural_se_citadel', name: 'Південно-Східний Бастіон', x: 3250, z: 4720, rot: -2.4, style: 'watchtower' },
+  // 24+ нових будинків (серед них 12 двоповерхових особняків, корчм та бастіонів)
+  { id: 'starter_manor_2f', name: 'Двоповерхова Садиба Лісника', x: -46, z: 46, rot: 0.42, style: 'manor_2f' },
+  { id: 'north_tavern_2f', name: 'Двоповерхова Корчма «Золотий Дуб»', x: -64, z: -78, rot: 0.65, style: 'tavern_2f' },
+  { id: 'east_watchkeep_2f', name: 'Двоповерхова Вартова Вежа Сходу', x: 96, z: 48, rot: -0.78, style: 'watchkeep_2f' },
+  { id: 'valley_cottage_south', name: 'Садиба Пасічника', x: -24, z: 74, rot: 0.15, style: 'cottage' },
+  { id: 'valley_bakery_east', name: 'Медова Пекарня Заріччя', x: 118, z: -8, rot: -1.05, style: 'bakery' },
+  { id: 'valley_alchemy_nw', name: 'Лавка Зіль біля Бору', x: -168, z: -124, rot: 0.9, style: 'alchemy' },
+  { id: 'sakura_manor_2f', name: 'Двоповерховий Дім Сакури', x: -280, z: 210, rot: 0.35, style: 'manor_2f' },
+  { id: 'oak_tavern_2f', name: 'Двоповерхова Корчма Дубрави', x: 320, z: 165, rot: -0.85, style: 'tavern_2f' },
+  { id: 'pine_watchkeep_2f', name: 'Двоповерхова Застава Бору', x: -360, z: -410, rot: 0.55, style: 'watchkeep_2f' },
+  { id: 'ridge_manor_2f', name: 'Двоповерхова Садиба Нагір’я', x: 420, z: -310, rot: -1.15, style: 'manor_2f' },
+  { id: 'steppe_shop_new', name: 'Степова Крамниця Спецій', x: 295, z: 680, rot: 1.4, style: 'shop' },
+  { id: 'swamp_cottage_new', name: 'Болотна Хатинка Знахаря', x: -460, z: 480, rot: -0.3, style: 'cottage' },
+  { id: 'autumn_tavern_2f', name: 'Двоповерхова Корчма «Багрянець»', x: -690, z: -680, rot: 0.72, style: 'tavern_2f' },
+  { id: 'bamboo_manor_2f', name: 'Двоповерховий Бамбуковий Павільйон', x: 760, z: 640, rot: -1.45, style: 'manor_2f' },
+  { id: 'canyon_watchkeep_2f', name: 'Двоповерховий Кристальний Форт', x: 960, z: -860, rot: -0.6, style: 'watchkeep_2f' },
+  { id: 'desert_caravan_house', name: 'Оазисна Лавка Мандрівників', x: 640, z: 1520, rot: 0.95, style: 'shop' },
+  { id: 'north_hunter_new', name: 'Зимова Хатина Мисливця', x: -520, z: -1680, rot: 0.3, style: 'hunter' },
+  { id: 'frost_watchkeep_2f', name: 'Двоповерховий Бастіон Криги', x: 540, z: -2650, rot: -0.9, style: 'watchkeep_2f' },
+  { id: 'west_bakery_new', name: 'Західна Булочна', x: -1120, z: -190, rot: 1.1, style: 'bakery' },
+  { id: 'west_manor_2f', name: 'Двоповерхова Західна Вілла', x: -1760, z: 540, rot: 0.48, style: 'manor_2f' },
+  { id: 'east_alchemy_new', name: 'Східна Вежа Алхімії', x: 1380, z: 140, rot: -1.7, style: 'alchemy' },
+  { id: 'east_tavern_2f', name: 'Двоповерховий Двір «Світанок»', x: 1940, z: -480, rot: -0.45, style: 'tavern_2f' },
+  { id: 'south_dune_house', name: 'Дім Південного Купця', x: -780, z: 2450, rot: 0.85, style: 'shop' },
+  { id: 'deep_north_cottage', name: 'Північна Світлиця', x: -1580, z: -2920, rot: 0.25, style: 'cottage' },
+  { id: 'deep_south_watchkeep', name: 'Південна Двоповерхова Твердиня', x: 1120, z: 3320, rot: -1.25, style: 'watchkeep_2f' },
 ];
 
 export const CABIN_SITES: CabinSite[] = [...BASE_CABIN_SITES];
+
+// 34 підземелля (данжі) з унікальною архітектурою, скринями скарбів та вартівниками по всьому континенту
+export const DUNGEON_SITES: DungeonSite[] = [
+  { id: 'valley_crypt', name: 'Склеп Забутих Лицарів', x: -126, z: -112, rot: 0.38, style: 'crypt', guardianKind: 'skeleton', tier: 1 },
+  { id: 'east_keep', name: 'Кам’яний Бастіон Долини', x: 132, z: 148, rot: -0.62, style: 'stone_keep', guardianKind: 'cursed_knight', tier: 1 },
+  { id: 'ember_shrine', name: 'Обсидіанове Святилище Вогню', x: 152, z: -18, rot: -1.1, style: 'obsidian_shrine', guardianKind: 'lava_imp', tier: 2 },
+  { id: 'south_barrows', name: 'Курган Давніх Воїнів', x: -62, z: 142, rot: 0.78, style: 'crypt', guardianKind: 'skeleton', tier: 1 },
+  { id: 'north_crypt_1', name: 'Крипта Вічної Мерзлоти', x: -290, z: -520, rot: 0.25, style: 'frost_bastion', guardianKind: 'frost_yeti', tier: 2 },
+  { id: 'pine_keep_2', name: 'Фортеця Темного Бору', x: 340, z: -480, rot: -0.45, style: 'stone_keep', guardianKind: 'cursed_knight', tier: 2 },
+  { id: 'sakura_shrine', name: 'Закинуте Святилище Сакури', x: -380, z: 340, rot: 1.15, style: 'obsidian_shrine', guardianKind: 'cursed_knight', tier: 2 },
+  { id: 'steppe_pyramid_1', name: 'Піраміда Золотого Вітру', x: 480, z: 860, rot: -0.35, style: 'pyramid', guardianKind: 'sand_mummy', tier: 2 },
+  { id: 'swamp_crypt', name: 'Трясовинний Склеп Боліт', x: -640, z: 880, rot: 0.9, style: 'crypt', guardianKind: 'skeleton', tier: 2 },
+  { id: 'autumn_keep', name: 'Цитадель Осінньої Тіні', x: -740, z: -460, rot: -0.8, style: 'stone_keep', guardianKind: 'cursed_knight', tier: 2 },
+  { id: 'bamboo_shrine', name: 'Нефритовий Вівтар Древніх', x: 820, z: 480, rot: 0.5, style: 'obsidian_shrine', guardianKind: 'cursed_knight', tier: 3 },
+  { id: 'canyon_shrine', name: 'Обсидіановий Каньйон Духів', x: 890, z: -720, rot: -1.2, style: 'obsidian_shrine', guardianKind: 'lava_imp', tier: 3 },
+  { id: 'frost_citadel_1', name: 'Крижаний Бастіон Півночі', x: -640, z: -1580, rot: 0.4, style: 'frost_bastion', guardianKind: 'frost_yeti', tier: 3 },
+  { id: 'frost_citadel_2', name: 'Замок Снігової Бурі', x: 740, z: -1950, rot: -0.7, style: 'frost_bastion', guardianKind: 'frost_yeti', tier: 3 },
+  { id: 'desert_pyramid_2', name: 'Велика Піраміда Сонця', x: 980, z: 1640, rot: 0.2, style: 'pyramid', guardianKind: 'sand_mummy', tier: 3 },
+  { id: 'desert_pyramid_3', name: 'Гробниця Фараона Дюн', x: -560, z: 2150, rot: -1.4, style: 'pyramid', guardianKind: 'sand_mummy', tier: 3 },
+  { id: 'west_keep_1', name: 'Західна Твердиня Заліза', x: -1240, z: -640, rot: 0.85, style: 'stone_keep', guardianKind: 'cursed_knight', tier: 3 },
+  { id: 'west_crypt_2', name: 'Західний Некрополь', x: -1560, z: 820, rot: -0.5, style: 'crypt', guardianKind: 'skeleton', tier: 3 },
+  { id: 'east_keep_2', name: 'Східний Замок Рубінів', x: 1460, z: -560, rot: 1.05, style: 'stone_keep', guardianKind: 'cursed_knight', tier: 3 },
+  { id: 'east_pyramid_4', name: 'Східна Піраміда Міражів', x: 1680, z: 1240, rot: -0.25, style: 'pyramid', guardianKind: 'sand_mummy', tier: 3 },
+  { id: 'highland_keep_3', name: 'Форт Забутих Вершин', x: -1880, z: -1520, rot: 0.62, style: 'stone_keep', guardianKind: 'cursed_knight', tier: 4 },
+  { id: 'ash_shrine_2', name: 'Вівтар Попелу та Магми', x: 1850, z: -1980, rot: -0.95, style: 'obsidian_shrine', guardianKind: 'lava_imp', tier: 4 },
+  { id: 'far_north_frost_3', name: 'Льодовий Чертог Гігантів', x: -960, z: -3150, rot: 0.3, style: 'frost_bastion', guardianKind: 'frost_yeti', tier: 4 },
+  { id: 'far_north_crypt_3', name: 'Північний Склеп Льодів', x: 1080, z: -3480, rot: -0.65, style: 'frost_bastion', guardianKind: 'frost_yeti', tier: 4 },
+  { id: 'deep_north_shrine', name: 'Святилище Полярної Зорі', x: -480, z: -5450, rot: 0.15, style: 'obsidian_shrine', guardianKind: 'boss', tier: 5 },
+  { id: 'deep_north_keep', name: 'Фортеця Північного Краю', x: 1350, z: -5220, rot: -1.1, style: 'frost_bastion', guardianKind: 'frost_yeti', tier: 5 },
+  { id: 'deep_south_pyr_5', name: 'Храм Піщаних Бурь', x: -1120, z: 3350, rot: 0.72, style: 'pyramid', guardianKind: 'sand_mummy', tier: 4 },
+  { id: 'deep_south_shrine', name: 'Вогняне Підземелля Дюн', x: 1240, z: 3680, rot: -0.4, style: 'obsidian_shrine', guardianKind: 'lava_imp', tier: 4 },
+  { id: 'far_south_pyr_6', name: 'Піраміда Забутого Бога', x: -760, z: 5520, rot: 0.55, style: 'pyramid', guardianKind: 'boss', tier: 5 },
+  { id: 'far_south_crypt', name: 'Склеп Південних Скель', x: 1420, z: 5680, rot: -0.88, style: 'crypt', guardianKind: 'cursed_knight', tier: 5 },
+  { id: 'west_rim_keep', name: 'Бастіон Західного Хребта', x: -2950, z: -920, rot: 0.45, style: 'stone_keep', guardianKind: 'cursed_knight', tier: 4 },
+  { id: 'east_rim_shrine', name: 'Святилище Східного Обрію', x: 2920, z: 720, rot: -0.75, style: 'obsidian_shrine', guardianKind: 'lava_imp', tier: 4 },
+  { id: 'nw_frost_palace', name: 'Північно-Західний Льодовий Данж', x: -2780, z: -3850, rot: 0.92, style: 'frost_bastion', guardianKind: 'boss', tier: 5 },
+  { id: 'se_abyss_vault', name: 'Південно-Східне Сховище Безодні', x: 2840, z: 3920, rot: -1.3, style: 'obsidian_shrine', guardianKind: 'boss', tier: 5 },
+];
+
+const DUNGEON_TRIG = DUNGEON_SITES.map((s) => ({
+  cos: Math.cos(s.rot),
+  sin: Math.sin(s.rot),
+}));
+
+const DUNGEON_CELL_SIZE = 128;
+const DUNGEON_BUCKETS = new Map<number, number[]>();
+
+function packDungeonCell(cx: number, cz: number): number {
+  return (cx + 128) * 512 + (cz + 128);
+}
+
+for (let i = 0; i < DUNGEON_SITES.length; i++) {
+  const s = DUNGEON_SITES[i];
+  const pad = 26;
+  const minCx = Math.floor((s.x - pad) / DUNGEON_CELL_SIZE);
+  const maxCx = Math.floor((s.x + pad) / DUNGEON_CELL_SIZE);
+  const minCz = Math.floor((s.z - pad) / DUNGEON_CELL_SIZE);
+  const maxCz = Math.floor((s.z + pad) / DUNGEON_CELL_SIZE);
+  for (let cx = minCx; cx <= maxCx; cx++) {
+    for (let cz = minCz; cz <= maxCz; cz++) {
+      const key = packDungeonCell(cx, cz);
+      let arr = DUNGEON_BUCKETS.get(key);
+      if (!arr) {
+        arr = [];
+        DUNGEON_BUCKETS.set(key, arr);
+      }
+      arr.push(i);
+    }
+  }
+}
+
+function getDungeonCandidates(x: number, z: number): number[] | undefined {
+  return DUNGEON_BUCKETS.get(
+    packDungeonCell(Math.floor(x / DUNGEON_CELL_SIZE), Math.floor(z / DUNGEON_CELL_SIZE)),
+  );
+}
 
 export const VILLAGE_SITE: VillageSite = {
   seed: 42069,
@@ -195,7 +335,7 @@ const CAVE_TRIG = CAVE_SITES.map((s) => ({
 
 let CABIN_TRIG: { cos: number; sin: number }[] = [];
 
-// O(1) Spatial Hash Bucket Index for ~98 cabins across 8096x16192 (CELL_SIZE = 128m, overlaps +-24m padded)
+// O(1) Spatial Hash Bucket Index for ~124 cabins across 8096x16192 (CELL_SIZE = 128m, overlaps +-24m padded)
 const CABIN_CELL_SIZE = 128;
 const CABIN_BUCKETS = new Map<number, number[]>();
 
@@ -632,12 +772,28 @@ export function groundHeightAt(x: number, z: number): number {
       const site = CABIN_SITES[cands[k]];
       const dx = x - site.x;
       const dz = z - site.z;
-      if (Math.abs(dx) < 19 && Math.abs(dz) < 19) {
+      if (Math.abs(dx) < 20 && Math.abs(dz) < 20) {
         const dSq = dx * dx + dz * dz;
-        if (dSq < 361) {
+        if (dSq < 400) {
           const d = Math.sqrt(dSq);
-          const t = Math.max(0, 1 - Math.max(0, d - 7.5) / 11.5);
+          const t = Math.max(0, 1 - Math.max(0, d - 8.2) / 11.8);
           flatFactor *= 1 - 0.9 * (t * t * (3 - 2 * t));
+        }
+      }
+    }
+  }
+  const dCands = getDungeonCandidates(x, z);
+  if (dCands) {
+    for (let k = 0; k < dCands.length; k++) {
+      const dSite = DUNGEON_SITES[dCands[k]];
+      const dx = x - dSite.x;
+      const dz = z - dSite.z;
+      if (Math.abs(dx) < 21 && Math.abs(dz) < 21) {
+        const dSq = dx * dx + dz * dz;
+        if (dSq < 441) {
+          const d = Math.sqrt(dSq);
+          const t = Math.max(0, 1 - Math.max(0, d - 11.0) / 10.0);
+          flatFactor *= 1 - 0.92 * (t * t * (3 - 2 * t));
         }
       }
     }
@@ -827,6 +983,27 @@ export function cabinFloorY(site: CabinSite = CABIN_SITES[0]): number {
   return cabinBaseY(site) + 0.82;
 }
 
+export function cabinSecondFloorY(site: CabinSite = CABIN_SITES[0]): number {
+  return cabinFloorY(site) + 3.4;
+}
+
+export function dungeonFloorY(site: DungeonSite): number {
+  return groundHeightAt(site.x, site.z) + 0.42;
+}
+
+export function fromDungeonLocal(
+  lx: number,
+  lz: number,
+  site: DungeonSite,
+): { x: number; z: number } {
+  const c = Math.cos(site.rot);
+  const s = Math.sin(site.rot);
+  return {
+    x: site.x + lx * c + lz * s,
+    z: site.z - lx * s + lz * c,
+  };
+}
+
 export function toCabinLocal(
   x: number,
   z: number,
@@ -863,15 +1040,37 @@ export function findInsideCabin(x: number, z: number): CabinSite | null {
     const site = CABIN_SITES[i];
     const dx = x - site.x;
     const dz = z - site.z;
-    if (Math.abs(dx) > 7.5 || Math.abs(dz) > 7.5) continue;
+    if (Math.abs(dx) > 9.5 || Math.abs(dz) > 9.5) continue;
+    const dims = getCabinDims(site.style);
     const trig = CABIN_TRIG[i];
     const lx = dx * trig.cos - dz * trig.sin;
     const lz = dx * trig.sin + dz * trig.cos;
     const insideShell =
-      Math.abs(lx) < CABIN_HALF_W + 0.15 && lz > -CABIN_HALF_D - 0.1 && lz < CABIN_HALF_D + 0.35;
+      Math.abs(lx) < dims.halfW + 0.25 &&
+      lz > -dims.halfD - 0.15 &&
+      lz < dims.halfD + (dims.isTwoStory ? 1.35 : 0.35);
     const onDoorThreshold =
-      Math.abs(lx) < 1.85 && lz >= CABIN_HALF_D + 0.35 && lz <= CABIN_HALF_D + 1.85;
+      Math.abs(lx) < 1.95 && lz >= dims.halfD + 0.35 && lz <= dims.halfD + 1.95;
     if (insideShell || onDoorThreshold) {
+      return site;
+    }
+  }
+  return null;
+}
+
+export function findInsideDungeon(x: number, z: number): DungeonSite | null {
+  const dCands = getDungeonCandidates(x, z);
+  if (!dCands) return null;
+  for (let k = 0; k < dCands.length; k++) {
+    const i = dCands[k];
+    const site = DUNGEON_SITES[i];
+    const dx = x - site.x;
+    const dz = z - site.z;
+    if (Math.abs(dx) > 12 || Math.abs(dz) > 12) continue;
+    const trig = DUNGEON_TRIG[i];
+    const lx = dx * trig.cos - dz * trig.sin;
+    const lz = dx * trig.sin + dz * trig.cos;
+    if (Math.abs(lx) <= 7.8 && Math.abs(lz) <= 7.8) {
       return site;
     }
   }
@@ -904,6 +1103,28 @@ export function findInsideCave(x: number, z: number, currentY?: number): CaveSit
 
 export function isInsideCabin(x: number, z: number): boolean {
   return findInsideCabin(x, z) !== null;
+}
+
+export function nearAnyDungeon(x: number, z: number, margin: number): boolean {
+  const mSq = margin * margin;
+  if (margin <= 26) {
+    const dCands = getDungeonCandidates(x, z);
+    if (!dCands) return false;
+    for (let k = 0; k < dCands.length; k++) {
+      const site = DUNGEON_SITES[dCands[k]];
+      const dx = x - site.x;
+      const dz = z - site.z;
+      if (Math.abs(dx) < margin && Math.abs(dz) < margin && dx * dx + dz * dz < mSq) return true;
+    }
+    return false;
+  }
+  for (let i = 0; i < DUNGEON_SITES.length; i++) {
+    const site = DUNGEON_SITES[i];
+    const dx = x - site.x;
+    const dz = z - site.z;
+    if (Math.abs(dx) < margin && Math.abs(dz) < margin && dx * dx + dz * dz < mSq) return true;
+  }
+  return false;
 }
 
 export function nearAnyCabin(x: number, z: number, margin: number): boolean {
@@ -1038,7 +1259,62 @@ function pushOutOfBoxesInPlace(
   _pushZ = outZ;
 }
 
-export function resolveCabinCollision(x: number, z: number, radius: number): [number, number] {
+const TWO_STORY_HALF_W = 4.8;
+const TWO_STORY_HALF_D = 4.0;
+
+const TWO_STORY_GROUND_WALLS: readonly [number, number, number, number][] = [
+  [-TWO_STORY_HALF_W - 0.35, -TWO_STORY_HALF_W + 0.35, -TWO_STORY_HALF_D - 0.3, TWO_STORY_HALF_D + 0.3],
+  [TWO_STORY_HALF_W - 0.35, TWO_STORY_HALF_W + 0.35, -TWO_STORY_HALF_D - 0.3, TWO_STORY_HALF_D + 0.3],
+  [-TWO_STORY_HALF_W - 0.3, TWO_STORY_HALF_W + 0.3, -TWO_STORY_HALF_D - 0.35, -TWO_STORY_HALF_D + 0.35],
+  [-TWO_STORY_HALF_W - 0.3, -1.45, TWO_STORY_HALF_D - 0.32, TWO_STORY_HALF_D + 0.32],
+  [1.45, TWO_STORY_HALF_W + 0.3, TWO_STORY_HALF_D - 0.32, TWO_STORY_HALF_D + 0.32],
+];
+
+const TWO_STORY_GROUND_BOXES: readonly [number, number, number, number][] = [
+  ...TWO_STORY_GROUND_WALLS,
+  [-4.3, -2.55, -1.9, 0.2],
+  [-4.25, -2.4, -3.55, -2.5],
+  [-4.25, -2.6, 1.5, 2.9],
+  [1.95, 2.25, -2.2, 2.5], // staircase inner side partition
+];
+
+const TWO_STORY_SECOND_BOXES: readonly [number, number, number, number][] = [
+  // Exterior 2F walls (open doorway at front balcony lx in [-1.45, 1.45])
+  [-TWO_STORY_HALF_W - 0.35, -TWO_STORY_HALF_W + 0.35, -TWO_STORY_HALF_D - 0.3, TWO_STORY_HALF_D + 0.3],
+  [TWO_STORY_HALF_W - 0.35, TWO_STORY_HALF_W + 0.35, -TWO_STORY_HALF_D - 0.3, TWO_STORY_HALF_D + 0.3],
+  [-TWO_STORY_HALF_W - 0.3, TWO_STORY_HALF_W + 0.3, -TWO_STORY_HALF_D - 0.35, -TWO_STORY_HALF_D + 0.35],
+  [-TWO_STORY_HALF_W - 0.3, -1.35, TWO_STORY_HALF_D - 0.32, TWO_STORY_HALF_D + 0.32],
+  [1.35, TWO_STORY_HALF_W + 0.3, TWO_STORY_HALF_D - 0.32, TWO_STORY_HALF_D + 0.32],
+  // Balcony guardrails (front balcony extends to lz = +5.35)
+  [-TWO_STORY_HALF_W - 0.25, -TWO_STORY_HALF_W + 0.25, TWO_STORY_HALF_D, TWO_STORY_HALF_D + 1.45],
+  [TWO_STORY_HALF_W - 0.25, TWO_STORY_HALF_W + 0.25, TWO_STORY_HALF_D, TWO_STORY_HALF_D + 1.45],
+  [-TWO_STORY_HALF_W - 0.25, TWO_STORY_HALF_W + 0.25, TWO_STORY_HALF_D + 1.25, TWO_STORY_HALF_D + 1.55],
+  // Stairwell guardrail on 2F (open at top landing lz < -1.8)
+  [1.92, 2.24, -1.75, 2.95],
+  [1.92, 4.55, 2.75, 3.05],
+  // Upstairs bed & wardrobe
+  [-4.25, -2.35, -3.55, -2.0],
+  [-4.25, -2.85, 0.8, 2.4],
+];
+
+const DUNGEON_WALL_BOXES: readonly [number, number, number, number][] = [
+  [-8.2, -7.2, -8.2, 8.2],
+  [7.2, 8.2, -8.2, 8.2],
+  [-8.2, 8.2, -8.2, -7.2],
+  [-8.2, -2.2, 7.2, 8.2],
+  [2.2, 8.2, 7.2, 8.2],
+  [-4.8, -3.5, -4.8, -3.5],
+  [3.5, 4.8, -4.8, -3.5],
+  [-4.8, -3.5, 3.5, 4.8],
+  [3.5, 4.8, 3.5, 4.8],
+];
+
+export function resolveCabinCollision(
+  x: number,
+  z: number,
+  radius: number,
+  currentY?: number,
+): [number, number] {
   let outX = x;
   let outZ = z;
   const cands = getCabinCandidates(x, z);
@@ -1049,22 +1325,64 @@ export function resolveCabinCollision(x: number, z: number, radius: number): [nu
     const site = CABIN_SITES[i];
     const dx = outX - site.x;
     const dz = outZ - site.z;
-    if (Math.abs(dx) > 8.5 || Math.abs(dz) > 8.5) continue;
+    if (Math.abs(dx) > 10.8 || Math.abs(dz) > 10.8) continue;
 
+    const dims = getCabinDims(site.style);
     const trig = CABIN_TRIG[i];
     const lx = dx * trig.cos - dz * trig.sin;
     const lz = dx * trig.sin + dz * trig.cos;
     if (
-      Math.abs(lx) > CABIN_HALF_W + 1.5 ||
-      lz < -CABIN_HALF_D - 1.5 ||
-      lz > CABIN_HALF_D + 1.5
+      Math.abs(lx) > dims.halfW + 1.8 ||
+      lz < -dims.halfD - 1.5 ||
+      lz > dims.halfD + (dims.isTwoStory ? 2.4 : 1.5)
     ) {
       continue;
     }
 
-    const isMerchantHouse =
-      site.style === 'shop' || site.style === 'bakery' || site.style === 'alchemy';
-    pushOutOfBoxesInPlace(lx, lz, radius, isMerchantHouse ? CABIN_COUNTER_BOXES : CABIN_STANDARD_BOXES);
+    if (dims.isTwoStory) {
+      const secondY = cabinFloorY(site) + 2.35;
+      const onSecondFloor = currentY !== undefined && currentY >= secondY;
+      pushOutOfBoxesInPlace(
+        lx,
+        lz,
+        radius,
+        onSecondFloor ? TWO_STORY_SECOND_BOXES : TWO_STORY_GROUND_BOXES,
+      );
+    } else {
+      const isMerchantHouse =
+        site.style === 'shop' || site.style === 'bakery' || site.style === 'alchemy';
+      pushOutOfBoxesInPlace(lx, lz, radius, isMerchantHouse ? CABIN_COUNTER_BOXES : CABIN_STANDARD_BOXES);
+    }
+    outX = site.x + _pushX * trig.cos + _pushZ * trig.sin;
+    outZ = site.z - _pushX * trig.sin + _pushZ * trig.cos;
+  }
+
+  return [outX, outZ];
+}
+
+export function resolveDungeonCollision(
+  x: number,
+  z: number,
+  radius: number,
+): [number, number] {
+  let outX = x;
+  let outZ = z;
+  const dCands = getDungeonCandidates(x, z);
+  if (!dCands) return [outX, outZ];
+
+  for (let k = 0; k < dCands.length; k++) {
+    const i = dCands[k];
+    const site = DUNGEON_SITES[i];
+    const dx = outX - site.x;
+    const dz = outZ - site.z;
+    if (Math.abs(dx) > 11.5 || Math.abs(dz) > 11.5) continue;
+
+    const trig = DUNGEON_TRIG[i];
+    const lx = dx * trig.cos - dz * trig.sin;
+    const lz = dx * trig.sin + dz * trig.cos;
+    if (Math.abs(lx) > 9.6 || Math.abs(lz) > 9.6) continue;
+
+    pushOutOfBoxesInPlace(lx, lz, radius, DUNGEON_WALL_BOXES);
     outX = site.x + _pushX * trig.cos + _pushZ * trig.sin;
     outZ = site.z - _pushX * trig.sin + _pushZ * trig.cos;
   }
@@ -1152,24 +1470,67 @@ export function walkableHeightAt(x: number, z: number, currentY?: number): numbe
       const site = CABIN_SITES[i];
       const dx = x - site.x;
       const dz = z - site.z;
-      if (Math.abs(dx) > 9.0 || Math.abs(dz) > 9.0) continue;
+      if (Math.abs(dx) > 10.8 || Math.abs(dz) > 10.8) continue;
+      const dims = getCabinDims(site.style);
       const trig = CABIN_TRIG[i];
       const lx = dx * trig.cos - dz * trig.sin;
       const lz = dx * trig.sin + dz * trig.cos;
       if (
-        Math.abs(lx) > CABIN_HALF_W + 1.2 ||
-        lz < -CABIN_HALF_D - 0.5 ||
-        lz > CABIN_HALF_D + 3.2
+        Math.abs(lx) > dims.halfW + 1.4 ||
+        lz < -dims.halfD - 0.5 ||
+        lz > dims.halfD + 3.2
       ) {
         continue;
       }
       const floorY = cabinFloorY(site);
-      if (Math.abs(lx) <= CABIN_HALF_W && lz >= -CABIN_HALF_D && lz <= CABIN_HALF_D + 1.55) {
+      if (dims.isTwoStory) {
+        const secondFloorY = floorY + 3.4;
+        if (lx >= 2.1 && lx <= 4.55 && lz >= -1.95 && lz <= 2.85) {
+          const stairT = Math.max(0, Math.min(1, (2.65 - lz) / 4.45));
+          const stairY = floorY + stairT * 3.4;
+          if (currentY === undefined || currentY <= stairY + 1.65) {
+            return Math.max(terrainY, stairY);
+          }
+        }
+        const inStairwellHole = lx >= 2.05 && lx <= 4.55 && lz >= -1.85 && lz <= 2.85;
+        if (
+          currentY !== undefined &&
+          currentY >= floorY + 2.35 &&
+          !inStairwellHole &&
+          Math.abs(lx) <= dims.halfW + 0.15 &&
+          lz >= -dims.halfD &&
+          lz <= dims.halfD + 1.38
+        ) {
+          return secondFloorY;
+        }
+      }
+      if (Math.abs(lx) <= dims.halfW && lz >= -dims.halfD && lz <= dims.halfD + 1.55) {
         return Math.max(terrainY, floorY);
       }
-      if (Math.abs(lx) <= 2.15 && lz > CABIN_HALF_D + 1.55 && lz <= CABIN_HALF_D + 2.85) {
-        const t = Math.max(0, Math.min(1, (CABIN_HALF_D + 2.85 - lz) / 1.3));
+      if (Math.abs(lx) <= 2.15 && lz > dims.halfD + 1.55 && lz <= dims.halfD + 2.85) {
+        const t = Math.max(0, Math.min(1, (dims.halfD + 2.85 - lz) / 1.3));
         return Math.max(terrainY, terrainY * (1 - t) + floorY * t);
+      }
+    }
+  }
+
+  const dCands = getDungeonCandidates(x, z);
+  if (dCands) {
+    for (let k = 0; k < dCands.length; k++) {
+      const i = dCands[k];
+      const dSite = DUNGEON_SITES[i];
+      const dx = x - dSite.x;
+      const dz = z - dSite.z;
+      if (Math.abs(dx) > 11.5 || Math.abs(dz) > 11.5) continue;
+      const trig = DUNGEON_TRIG[i];
+      const lx = dx * trig.cos - dz * trig.sin;
+      const lz = dx * trig.sin + dz * trig.cos;
+      if (Math.abs(lx) <= 8.2 && Math.abs(lz) <= 8.2) {
+        const baseFloor = dungeonFloorY(dSite);
+        if (Math.abs(lx) <= 2.2 && Math.abs(lz) <= 2.2) {
+          return Math.max(terrainY, baseFloor + 0.55);
+        }
+        return Math.max(terrainY, baseFloor);
       }
     }
   }
@@ -1205,6 +1566,8 @@ export function walkableHeightAt(x: number, z: number, currentY?: number): numbe
 export function getZoneName(x: number, z: number, currentY?: number): string {
   const inside = findInsideCabin(x, z);
   if (inside) return `Усередині: ${inside.name}`;
+  const insideDungeon = findInsideDungeon(x, z);
+  if (insideDungeon) return `Підземелля: ${insideDungeon.name}`;
   const insideCave = findInsideCave(x, z, currentY);
   if (insideCave) return `Печера: ${insideCave.name}`;
   const cands = getCabinCandidates(x, z);
@@ -1212,6 +1575,13 @@ export function getZoneName(x: number, z: number, currentY?: number): string {
     for (let k = 0; k < cands.length; k++) {
       const site = CABIN_SITES[cands[k]];
       if (Math.hypot(x - site.x, z - site.z) < 13) return site.name;
+    }
+  }
+  const dCands = getDungeonCandidates(x, z);
+  if (dCands) {
+    for (let k = 0; k < dCands.length; k++) {
+      const dSite = DUNGEON_SITES[dCands[k]];
+      if (Math.hypot(x - dSite.x, z - dSite.z) < 15) return `Підземелля: ${dSite.name}`;
     }
   }
   for (let i = 0; i < VILLAGE_SITES.length; i++) {

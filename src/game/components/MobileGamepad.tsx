@@ -18,6 +18,7 @@ import {
   CameraViewMode,
   CONSUMABLES,
   ConsumableId,
+  LanguageCode,
   RELIC_SKILLS,
   RelicId,
   UpgradeId,
@@ -26,8 +27,10 @@ import {
   WEAPONS,
   GameMode,
 } from '../types';
+import { getCameraLabel, getUiStrings } from '../i18n';
 
 interface MobileGamepadProps {
+  language?: LanguageCode;
   activeWeapon: WeaponId;
   gameMode: GameMode;
   cameraViewMode: CameraViewMode;
@@ -69,14 +72,8 @@ const SHORT_CONSUMABLE_LABEL: Partial<Record<ConsumableId, string>> = {
   phoenix_elixir: 'Фенікс',
 };
 
-const CAMERA_SHORT_LABEL: Record<CameraViewMode, string> = {
-  third: '3-тя',
-  first: '1-ше',
-  close: 'Близ.',
-  far: 'Огляд',
-};
-
 const MobileGamepadInner: React.FC<MobileGamepadProps> = ({
+  language,
   activeWeapon,
   gameMode,
   cameraViewMode,
@@ -103,6 +100,7 @@ const MobileGamepadInner: React.FC<MobileGamepadProps> = ({
   onCycleBuildFloor,
   onDemolishBuild,
 }) => {
+  const s = getUiStrings(language);
   const stickRef = useRef<HTMLDivElement | null>(null);
   const activePointerId = useRef<number | null>(null);
   const [knob, setKnob] = useState({ x: 0, y: 0, sprinting: false });
@@ -163,7 +161,7 @@ const MobileGamepadInner: React.FC<MobileGamepadProps> = ({
       <div className="pointer-events-auto flex shrink-0 flex-col items-center gap-0.5 touch-none">
         {knob.sprinting && (
           <span className="rounded-full bg-sky-500/85 px-1.5 py-0.5 text-[8px] sm:text-[10px] font-bold text-slate-950">
-            БІГ
+            {s.sprintBadge}
           </span>
         )}
         <div
@@ -262,7 +260,7 @@ const MobileGamepadInner: React.FC<MobileGamepadProps> = ({
                       : 'border-slate-300 dark:border-white/15 bg-white/75 dark:bg-slate-950/75 text-slate-400'
                   }`}
                 >
-                  {cd > 0 ? `${Math.ceil(cd)}с` : rel.key}
+                  {cd > 0 ? `${Math.ceil(cd)}${s.secShort}` : rel.key}
                 </button>
               );
             })}
@@ -296,7 +294,7 @@ const MobileGamepadInner: React.FC<MobileGamepadProps> = ({
               className="flex h-7 sm:h-10 items-center justify-center rounded-full border border-amber-500/55 bg-white/90 dark:bg-slate-950/85 px-2 sm:px-2.5 text-[9px] sm:text-[10px] font-bold text-amber-800 dark:text-amber-200 active:scale-95"
               title="Поверх (Авто / 1–6)"
             >
-              <span>{buildFloorLevel === 0 ? 'Авто' : `${buildFloorLevel}п`}</span>
+              <span>{buildFloorLevel === 0 ? s.autoFloor : `${buildFloorLevel}${s.floorShort}`}</span>
             </button>
             <button
               type="button"
@@ -341,7 +339,7 @@ const MobileGamepadInner: React.FC<MobileGamepadProps> = ({
             className="flex h-7 sm:h-10 items-center gap-0.5 sm:gap-1 rounded-full border border-sky-500/45 bg-white/90 px-1.5 sm:px-2.5 text-[9px] sm:text-[10px] font-bold text-sky-800 shadow-sm active:scale-95 dark:border-sky-400/45 dark:bg-slate-950/85 dark:text-sky-200"
           >
             <Camera className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-            <span>{CAMERA_SHORT_LABEL[cameraViewMode]}</span>
+            <span>{getCameraLabel(language, cameraViewMode, true)}</span>
           </button>
 
           {totalConsumables > 0 && primaryConsumable && (
@@ -410,7 +408,7 @@ const MobileGamepadInner: React.FC<MobileGamepadProps> = ({
             }`}
           >
             {nearShop ? <Store className="h-3 w-3 sm:h-4 sm:w-4" /> : <Hand className="h-3 w-3 sm:h-4 sm:w-4" />}
-            <span className="leading-none">{nearShop ? 'Крам' : 'Дія'}</span>
+            <span className="leading-none">{nearShop ? s.actionShop : s.actionInteract}</span>
           </button>
         </div>
 
@@ -437,7 +435,7 @@ const MobileGamepadInner: React.FC<MobileGamepadProps> = ({
             }`}
           >
             <Shield className="h-3 w-3 sm:h-4 sm:w-4" />
-            <span>Щит</span>
+            <span>{s.actionShield}</span>
           </button>
 
           <button
@@ -451,7 +449,7 @@ const MobileGamepadInner: React.FC<MobileGamepadProps> = ({
             className="flex h-8 w-8 sm:h-12 sm:w-12 flex-col items-center justify-center rounded-full border-2 border-slate-300/80 bg-white/90 text-[7px] sm:text-[10px] font-bold text-slate-800 shadow-lg active:scale-95 active:bg-slate-200 dark:border-white/30 dark:bg-slate-900/80 dark:text-slate-100 dark:active:bg-slate-700"
           >
             <ArrowUp className="h-3 w-3 sm:h-4 sm:w-4" />
-            <span>Стриб</span>
+            <span>{s.actionJump}</span>
           </button>
 
           <button
@@ -475,22 +473,22 @@ const MobileGamepadInner: React.FC<MobileGamepadProps> = ({
             {activeWeapon === 'builder' ? (
               <>
                 <Wrench className="h-3.5 w-3.5 sm:h-5 sm:w-5" />
-                <span className="text-[7px] sm:text-[10px]">Збуд</span>
+                <span className="text-[7px] sm:text-[10px]">{s.actionBuild}</span>
               </>
             ) : activeWeapon === 'axe' ? (
               <>
                 <Axe className="h-3.5 w-3.5 sm:h-5 sm:w-5" />
-                <span className="text-[7px] sm:text-[10px]">Зруб</span>
+                <span className="text-[7px] sm:text-[10px]">{s.actionChop}</span>
               </>
             ) : activeWeapon === 'pickaxe' ? (
               <>
                 <Pickaxe className="h-3.5 w-3.5 sm:h-5 sm:w-5" />
-                <span className="text-[7px] sm:text-[10px]">Коп</span>
+                <span className="text-[7px] sm:text-[10px]">{s.actionMine}</span>
               </>
             ) : (
               <>
                 <Sword className="h-3.5 w-3.5 sm:h-5 sm:w-5" />
-                <span className="text-[7px] sm:text-[10px]">Удар</span>
+                <span className="text-[7px] sm:text-[10px]">{s.actionAttack}</span>
               </>
             )}
             {weaponCooldownRatio > 0.03 && (
@@ -513,6 +511,7 @@ function consumablesSignature(c: Record<ConsumableId, number>): string {
 export const MobileGamepad = React.memo(
   MobileGamepadInner,
   (prev, next) =>
+    prev.language === next.language &&
     prev.activeWeapon === next.activeWeapon &&
     prev.gameMode === next.gameMode &&
     prev.cameraViewMode === next.cameraViewMode &&

@@ -64,6 +64,7 @@ import {
   ConsumableId,
   GameHudState,
   GameMode,
+  LanguageCode,
   MerchantKind,
   MOB_DEFS,
   MobKind,
@@ -71,13 +72,12 @@ import {
   RELIC_SKILLS,
   RelicId,
   ResourceId,
-  SEASON_LABELS,
   ThemeMode,
   WEAPON_UNLOCK_MAP,
-  WEATHER_LABELS,
   WeaponId,
   WEAPONS,
 } from '../types';
+import { getCameraLabel, getGameModeLabel, getUiStrings, translateZoneName } from '../i18n';
 import { ModalTab } from './InventoryCraftModal';
 import { Minimap } from './Minimap';
 import { MobileGamepad } from './MobileGamepad';
@@ -87,6 +87,7 @@ import { CLIENT_APP_LABEL } from '../../version';
 interface GameHudProps {
   hud: GameHudState;
   theme: ThemeMode;
+  language?: LanguageCode;
   onToggleTheme: () => void;
   onOpenGraphics: () => void;
   onOpenSqlAdmin: () => void;
@@ -178,6 +179,7 @@ const keepCanvasFocus = (e: React.MouseEvent<HTMLButtonElement>) => {
 export const GameHud: React.FC<GameHudProps> = ({
   hud,
   theme,
+  language,
   onToggleTheme,
   onOpenGraphics,
   onOpenSqlAdmin,
@@ -224,6 +226,8 @@ export const GameHud: React.FC<GameHudProps> = ({
   onSendChat,
   onTeleportToPlayer,
 }) => {
+  const s = getUiStrings(language);
+  const translatedZoneName = translateZoneName(hud.zoneName, language);
   const [dockCollapsed, setDockCollapsed] = useState(false);
   const [arsenalOpen, setArsenalOpen] = useState(false);
   const [mobSpawnerOpen, setMobSpawnerOpen] = useState(false);
@@ -300,14 +304,7 @@ export const GameHud: React.FC<GameHudProps> = ({
     hud.insideCave ||
     hud.inWater;
 
-  const cameraLabel =
-    hud.cameraViewMode === 'first'
-      ? '1-ше [7]'
-      : hud.cameraViewMode === 'close'
-        ? 'Близько [7]'
-        : hud.cameraViewMode === 'far'
-          ? 'Огляд [7]'
-          : '3-тя [7]';
+  const cameraLabel = getCameraLabel(language, hud.cameraViewMode, false);
 
   const activePotionBuffs = [
     { key: 'rage', label: 'Лють', sec: hud.potionBuffs.rage },
@@ -369,7 +366,7 @@ export const GameHud: React.FC<GameHudProps> = ({
               }`}
             >
               <Menu className="h-3 w-3" />
-              <span>Меню</span>
+              <span>{s.menu}</span>
             </button>
 
             {/* Full Desktop Toolbar (>= sm) */}
@@ -480,7 +477,7 @@ export const GameHud: React.FC<GameHudProps> = ({
               ) : (
                 <Moon className="h-3.5 w-3.5 text-indigo-600" />
               )}
-              <span className="hidden md:inline">{theme === 'dark' ? 'Темна' : 'Світла'}</span>
+              <span className="hidden md:inline">{theme === 'dark' ? s.darkTheme : s.lightTheme}</span>
             </button>
 
             {/* Graphics Settings Button (Desktop) */}
@@ -491,11 +488,11 @@ export const GameHud: React.FC<GameHudProps> = ({
                 e.currentTarget.blur();
                 onOpenGraphics();
               }}
-              title="Налаштування графіки та продуктивності"
+              title={s.graphics}
               className={`hidden sm:flex h-8 items-center gap-1 rounded-xl px-2 text-[11px] font-semibold ${GLASS_BTN}`}
             >
               <SlidersHorizontal className="h-3.5 w-3.5 text-sky-600 dark:text-sky-300" />
-              <span>Графіка</span>
+              <span>{s.graphics}</span>
             </button>
 
             {/* phpMyAdmin SQL Admin Button (Desktop) */}
@@ -506,7 +503,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 e.currentTarget.blur();
                 onOpenSqlAdmin();
               }}
-              title="phpMyAdmin · SQLite База Даних"
+              title="phpMyAdmin · SQLite"
               className="hidden sm:flex h-8 items-center gap-1 rounded-xl border border-amber-500/45 bg-amber-500/15 px-2 text-[11px] font-bold text-amber-800 shadow-sm backdrop-blur-md transition-colors hover:bg-amber-500/25 dark:border-amber-400/40 dark:bg-amber-500/18 dark:text-amber-200 dark:hover:bg-amber-500/28"
             >
               <Database className="h-3.5 w-3.5 text-amber-600 dark:text-amber-300" />
@@ -521,13 +518,13 @@ export const GameHud: React.FC<GameHudProps> = ({
                 e.currentTarget.blur();
                 onCycleSeason();
               }}
-              title="Змінити пору року"
+              title={s.seasons[hud.season]}
               className={`hidden sm:flex h-8 items-center gap-1 rounded-xl px-2 text-[11px] font-semibold ${GLASS_BTN}`}
             >
               {SeasonIcon}
-              <span>{SEASON_LABELS[hud.season]}</span>
+              <span>{s.seasons[hud.season]}</span>
               <span className="font-mono-nums text-[10px] text-slate-500 dark:text-slate-400">
-                {Math.max(1, Math.ceil(hud.seasonRemainingSec / 60))}хв
+                {Math.max(1, Math.ceil(hud.seasonRemainingSec / 60))}{s.minShort}
               </span>
             </button>
             <button
@@ -537,11 +534,11 @@ export const GameHud: React.FC<GameHudProps> = ({
                 e.currentTarget.blur();
                 onCycleWeather();
               }}
-              title="Змінити погоду"
+              title={s.weather[hud.weather][hud.season]}
               className={`hidden sm:flex h-8 items-center gap-1 rounded-xl px-2 text-[11px] font-semibold ${GLASS_BTN}`}
             >
               {WeatherIcon}
-              <span>{WEATHER_LABELS[hud.weather][hud.season]}</span>
+              <span>{s.weather[hud.weather][hud.season]}</span>
             </button>
 
             {/* Camera View Mode Button (Key 7) - Hidden on <sm because MobileGamepad has Camera button directly */}
@@ -552,7 +549,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 e.currentTarget.blur();
                 onCycleCameraView();
               }}
-              title="Змінити вид камери: 3-тя особа / 1-ше лице / Близько / Огляд (клавіша 7)"
+              title={`${s.camera} [7]`}
               className={`hidden sm:flex h-8 items-center gap-1 rounded-xl px-2 text-[11px] font-semibold ${GLASS_BTN}`}
             >
               <Camera className="h-3.5 w-3.5 text-sky-600 dark:text-sky-300" />
@@ -561,36 +558,31 @@ export const GameHud: React.FC<GameHudProps> = ({
 
             {/* Game Mode 3-Way Selector - Ultra-compact on mobile */}
             <div className={`flex h-6 sm:h-8 items-center rounded-lg sm:rounded-xl p-0.5 ${GLASS_CARD}`}>
-              {(
-                [
-                  { id: 'survival', label: 'В', smLabel: 'Вижив.', title: 'Виживання: усе крафтиться самотужки, без стенда' },
-                  { id: 'peaceful', label: 'М', smLabel: 'Мирний', title: 'Мирний: моби не атакують, стенд біля спавну' },
-                  { id: 'creative', label: 'Т', smLabel: 'Творчий', title: 'Творчий: усе відкрито, безкоштовний крафт і політ' },
-                ] as { id: GameMode; label: string; smLabel: string; title: string }[]
-              ).map((m) => {
-                const active = hud.gameMode === m.id;
+              {(['survival', 'peaceful', 'creative'] as GameMode[]).map((modeId) => {
+                const active = hud.gameMode === modeId;
+                const ml = getGameModeLabel(language, modeId);
                 return (
                   <button
-                    key={m.id}
+                    key={modeId}
                     type="button"
                     onMouseDown={keepCanvasFocus}
                     onClick={(e) => {
                       e.currentTarget.blur();
-                      onChangeGameMode(m.id);
+                      onChangeGameMode(modeId);
                     }}
-                    title={m.title}
+                    title={ml.full}
                     className={`rounded-md sm:rounded-lg px-1.5 sm:px-2 py-0.5 sm:py-1 text-[9px] sm:text-[10px] font-bold transition-colors ${
                       active
-                        ? m.id === 'survival'
+                        ? modeId === 'survival'
                           ? 'bg-amber-500 text-slate-950'
-                          : m.id === 'peaceful'
+                          : modeId === 'peaceful'
                             ? 'bg-emerald-500 text-slate-950'
                             : 'bg-sky-500 text-slate-950'
                         : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
                     }`}
                   >
-                    <span className="sm:hidden">{m.label}</span>
-                    <span className="hidden sm:inline">{m.smLabel}</span>
+                    <span className="sm:hidden">{ml.short}</span>
+                    <span className="hidden sm:inline">{ml.full}</span>
                   </button>
                 );
               })}
@@ -637,7 +629,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 className="flex h-6 items-center gap-1 rounded-lg bg-emerald-500/18 px-2 text-[9px] font-bold text-emerald-800 dark:text-emerald-200"
               >
                 <Store className="h-3 w-3" />
-                <span>Купці</span>
+                <span>{s.merchantsBtn}</span>
               </button>
               <button
                 type="button"
@@ -649,7 +641,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 className="flex h-6 items-center gap-1 rounded-lg bg-purple-500/18 px-2 text-[9px] font-bold text-purple-800 dark:text-purple-200"
               >
                 <ScrollText className="h-3 w-3" />
-                <span>Квести</span>
+                <span>{s.questsBtn}</span>
               </button>
               <button
                 type="button"
@@ -664,7 +656,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 }`}
               >
                 <Gamepad2 className="h-3 w-3" />
-                <span>{touchMode ? 'Геймпад ✓' : 'Геймпад'}</span>
+                <span>{touchMode ? `${s.gamepadBtn} ✓` : s.gamepadBtn}</span>
               </button>
               <button
                 type="button"
@@ -676,7 +668,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 className="flex h-6 items-center gap-1 rounded-lg bg-slate-100 px-2 text-[9px] font-semibold text-slate-800 dark:bg-slate-800 dark:text-slate-200"
               >
                 <HelpCircle className="h-3 w-3" />
-                <span>Довідка</span>
+                <span>{s.help}</span>
               </button>
               <button
                 type="button"
@@ -688,7 +680,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 className="flex h-6 items-center gap-1 rounded-lg bg-sky-500/15 px-2 text-[9px] font-semibold text-sky-800 dark:text-sky-200"
               >
                 <SlidersHorizontal className="h-3 w-3" />
-                <span>Графіка</span>
+                <span>{s.graphics}</span>
               </button>
               <button
                 type="button"
@@ -709,7 +701,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 className="flex h-6 items-center gap-1 rounded-lg bg-slate-100 px-2 text-[9px] font-semibold text-slate-800 dark:bg-slate-800 dark:text-slate-200"
               >
                 {theme === 'dark' ? <Sun className="h-3 w-3 text-amber-400" /> : <Moon className="h-3 w-3" />}
-                <span>Тема</span>
+                <span>{s.themeShort}</span>
               </button>
               <button
                 type="button"
@@ -718,7 +710,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 className="flex h-6 items-center gap-1 rounded-lg bg-slate-100 px-2 text-[9px] font-semibold text-slate-800 dark:bg-slate-800 dark:text-slate-200"
               >
                 {SeasonIcon}
-                <span>{SEASON_LABELS[hud.season]}</span>
+                <span>{s.seasons[hud.season]}</span>
               </button>
               <button
                 type="button"
@@ -727,7 +719,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 className="flex h-6 items-center gap-1 rounded-lg bg-slate-100 px-2 text-[9px] font-semibold text-slate-800 dark:bg-slate-800 dark:text-slate-200"
               >
                 {WeatherIcon}
-                <span>{WEATHER_LABELS[hud.weather][hud.season]}</span>
+                <span>{s.weather[hud.weather][hud.season]}</span>
               </button>
               <button
                 type="button"
@@ -739,7 +731,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 className="flex h-6 items-center gap-1 rounded-lg bg-slate-100 px-2 text-[9px] font-semibold text-slate-800 dark:bg-slate-800 dark:text-slate-200"
               >
                 <Home className="h-3 w-3" />
-                <span>Хата</span>
+                <span>{s.cabin}</span>
               </button>
               <button
                 type="button"
@@ -748,7 +740,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 className="flex h-6 items-center gap-1 rounded-lg bg-slate-100 px-2 text-[9px] font-semibold text-slate-800 dark:bg-slate-800 dark:text-slate-200"
               >
                 {hud.muted ? <VolumeX className="h-3 w-3 text-rose-500" /> : <Volume2 className="h-3 w-3" />}
-                <span>Звук</span>
+                <span>{s.sound}</span>
               </button>
               <button
                 type="button"
@@ -760,7 +752,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 className="flex h-6 items-center gap-1 rounded-lg bg-slate-100 px-2 text-[9px] font-semibold text-slate-800 dark:bg-slate-800 dark:text-slate-200"
               >
                 {isFullscreen ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
-                <span>Екран</span>
+                <span>{s.screenBtn}</span>
               </button>
             </div>
           )}
@@ -770,20 +762,20 @@ export const GameHud: React.FC<GameHudProps> = ({
               <div className={`w-26 sm:w-48 rounded-lg sm:rounded-xl p-1 sm:p-2.5 ${GLASS_CARD}`}>
                 <div className="mb-0.5 sm:mb-1.5 flex items-center justify-between text-[8px] sm:text-[11px] leading-none">
                   <span className="flex items-center gap-0.5 sm:gap-1 font-display font-bold text-slate-900 dark:text-white">
-                    <span className="sm:hidden">Р.{hud.level}</span>
-                    <span className="hidden sm:inline">Рівень {hud.level}</span>
+                    <span className="sm:hidden">{s.levelShort}{hud.level}</span>
+                    <span className="hidden sm:inline">{s.level} {hud.level}</span>
                     <span className="rounded bg-cyan-500/20 px-1 py-0.5 font-mono-nums text-[7px] sm:text-[9px] font-bold text-cyan-800 dark:text-cyan-200">
                       {CLIENT_APP_LABEL}
                     </span>
                   </span>
                   <span className="font-mono-nums font-bold text-amber-600 dark:text-amber-300">
-                    {hud.coins}м
+                    {hud.coins}{s.coinsShort}
                   </span>
                 </div>
 
                 <div className="mb-0.5 sm:mb-1 flex items-center justify-between text-[7px] sm:text-[10px] leading-none text-slate-600 dark:text-slate-300">
                   <span className="sm:hidden">HP</span>
-                  <span className="hidden sm:inline">Здоров’я</span>
+                  <span className="hidden sm:inline">{s.health}</span>
                   <span className="font-mono-nums font-semibold text-emerald-600 dark:text-emerald-300">
                     {hud.hp}/{hud.maxHp}
                   </span>
@@ -857,8 +849,8 @@ export const GameHud: React.FC<GameHudProps> = ({
                   <div className="flex items-center justify-between font-mono-nums text-[7px] sm:text-[9px] text-slate-600 dark:text-slate-300">
                     <span className="truncate text-amber-700 dark:text-amber-300">
                       {hud.activeGoal.distanceMeters !== null
-                        ? `${hud.activeGoal.distanceMeters}м · ${hud.activeGoal.compassLabel}`
-                        : 'Поруч'}
+                        ? `${hud.activeGoal.distanceMeters}${s.metersShort} · ${hud.activeGoal.compassLabel}`
+                        : s.nearby}
                     </span>
                     {nextQuestDef && nextQuestState && (
                       <span className="font-bold text-purple-700 dark:text-purple-200">
@@ -879,7 +871,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 >
                   <span className="flex items-center gap-1 font-semibold">
                     <Trophy className="h-3 w-3 shrink-0 text-amber-500 dark:text-amber-300" />
-                    <span>Усі цілі виконано!</span>
+                    <span>{s.allGoalsDone}</span>
                   </span>
                 </button>
               )}
@@ -893,15 +885,15 @@ export const GameHud: React.FC<GameHudProps> = ({
             className={`hidden lg:flex items-center gap-2.5 rounded-xl px-3.5 py-1.5 text-[11px] font-medium whitespace-nowrap ${GLASS_CARD}`}
           >
             <span className="font-display text-xs font-bold text-slate-900 dark:text-white">
-              {hud.zoneName}
+              {translatedZoneName}
             </span>
             <span aria-hidden="true" className="text-slate-400 dark:text-slate-500">·</span>
             <span className="font-mono-nums font-semibold text-amber-600 dark:text-amber-300">
-              Хвиля {hud.wave}
+              {s.wave} {hud.wave}
             </span>
             <span aria-hidden="true" className="text-slate-400 dark:text-slate-500">·</span>
             <span className="font-mono-nums text-slate-600 dark:text-slate-300">
-              Ворогів: {hud.activeMobs}
+              {s.spawnerBtn}: {hud.activeMobs}
             </span>
           </div>
         )}
@@ -931,13 +923,13 @@ export const GameHud: React.FC<GameHudProps> = ({
                 }`}
               />
               <Users className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-              <span className="hidden sm:inline">Онлайн</span>
+              <span className="hidden sm:inline">{s.onlineBtn}</span>
               <span className="font-mono-nums">
                 {hud.onlineConnected ? Math.max(1, hud.onlinePlayers.length) : '…'}
               </span>
             </button>
             <div className="hidden sm:block">
-              <PWAInstallButton onModalOpenChange={onInstallModalChange} />
+              <PWAInstallButton language={language} onModalOpenChange={onInstallModalChange} />
             </div>
             <button
               type="button"
@@ -946,7 +938,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 e.currentTarget.blur();
                 onOpenInventory('inventory');
               }}
-              title="Інвентар (I)"
+              title={`${s.inventoryBtn} (I)`}
               className={`flex h-6 sm:h-8 items-center gap-1 rounded-lg sm:rounded-xl border px-1.5 sm:px-2 text-[10px] sm:text-[11px] font-semibold whitespace-nowrap shrink-0 backdrop-blur-md transition-colors ${
                 inventoryTab === 'inventory'
                   ? 'border-sky-500/60 bg-sky-500/20 text-sky-800 dark:border-sky-400/60 dark:bg-sky-500/25 dark:text-sky-200'
@@ -954,7 +946,7 @@ export const GameHud: React.FC<GameHudProps> = ({
               }`}
             >
               <Backpack className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-sky-600 dark:text-sky-300" />
-              <span className="hidden sm:inline">Інвентар</span>
+              <span className="hidden sm:inline">{s.inventoryBtn}</span>
             </button>
 
             <button
@@ -964,7 +956,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 e.currentTarget.blur();
                 onOpenInventory('craft');
               }}
-              title="Крафт (K)"
+              title={`${s.craftBtn} (K)`}
               className={`flex h-6 sm:h-8 items-center gap-1 rounded-lg sm:rounded-xl border px-1.5 sm:px-2 text-[10px] sm:text-[11px] font-semibold whitespace-nowrap shrink-0 backdrop-blur-md transition-colors ${
                 inventoryTab === 'craft'
                   ? 'border-amber-500/60 bg-amber-500/20 text-amber-800 dark:border-amber-400/60 dark:bg-amber-500/25 dark:text-amber-200'
@@ -972,7 +964,7 @@ export const GameHud: React.FC<GameHudProps> = ({
               }`}
             >
               <Hammer className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-600 dark:text-amber-300" />
-              <span className="hidden sm:inline">Крафт</span>
+              <span className="hidden sm:inline">{s.craftBtn}</span>
             </button>
 
             <button
@@ -982,7 +974,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 e.currentTarget.blur();
                 onOpenInventory('shop', hud.activeMerchantKind);
               }}
-              title="Купці та Крамниця (M)"
+              title={`${s.merchantsBtn} (M)`}
               className={`hidden sm:flex h-8 items-center gap-1 rounded-xl border px-2 text-[11px] font-semibold whitespace-nowrap shrink-0 backdrop-blur-md transition-colors ${
                 inventoryTab === 'shop'
                   ? 'border-emerald-500/60 bg-emerald-500/20 text-emerald-800 dark:border-emerald-400/60 dark:bg-emerald-500/25 dark:text-emerald-200'
@@ -990,7 +982,7 @@ export const GameHud: React.FC<GameHudProps> = ({
               }`}
             >
               <Store className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-300" />
-              <span>Купці</span>
+              <span>{s.merchantsBtn}</span>
             </button>
 
             <button
@@ -1000,7 +992,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 e.currentTarget.blur();
                 onOpenInventory('quests');
               }}
-              title="Квести долини (J)"
+              title={`${s.questsBtn} (J)`}
               className={`hidden sm:flex h-8 items-center gap-1 rounded-xl border px-2 text-[11px] font-semibold whitespace-nowrap shrink-0 backdrop-blur-md transition-colors ${
                 inventoryTab === 'quests'
                   ? 'border-purple-500/60 bg-purple-500/20 text-purple-800 dark:border-purple-400/60 dark:bg-purple-500/25 dark:text-purple-200'
@@ -1008,7 +1000,7 @@ export const GameHud: React.FC<GameHudProps> = ({
               }`}
             >
               <ScrollText className="h-3.5 w-3.5 text-purple-600 dark:text-purple-300" />
-              <span>Квести</span>
+              <span>{s.questsBtn}</span>
             </button>
 
             <button
@@ -1018,7 +1010,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 e.currentTarget.blur();
                 onToggleEcoMode();
               }}
-              title="Оптимізація GPU"
+              title={s.ecoModeLabel}
               className={`hidden md:flex h-8 items-center gap-1 rounded-xl border px-2 text-[11px] font-semibold whitespace-nowrap shrink-0 backdrop-blur-md transition-colors ${
                 hud.ecoMode
                   ? 'border-emerald-500/50 bg-emerald-500/18 text-emerald-800 dark:border-emerald-400/50 dark:bg-emerald-500/20 dark:text-emerald-200'
@@ -1026,7 +1018,7 @@ export const GameHud: React.FC<GameHudProps> = ({
               }`}
             >
               <Gauge className="h-3.5 w-3.5" />
-              <span>{hud.ecoMode ? 'Еко' : 'Макс'}</span>
+              <span>{hud.ecoMode ? s.ecoModeLabel : '130+'}</span>
             </button>
 
             <button
@@ -1036,7 +1028,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 e.currentTarget.blur();
                 setTouchMode((v) => !v);
               }}
-              title="Екранний геймпад"
+              title={s.gamepadBtn}
               className={`hidden sm:flex h-8 items-center gap-1 rounded-xl border px-2 text-[11px] font-semibold whitespace-nowrap shrink-0 backdrop-blur-md transition-colors ${
                 touchMode
                   ? 'border-emerald-500/60 bg-emerald-500/18 text-emerald-800 dark:border-emerald-400/60 dark:bg-emerald-500/20 dark:text-emerald-200'
@@ -1044,7 +1036,7 @@ export const GameHud: React.FC<GameHudProps> = ({
               }`}
             >
               <Gamepad2 className="h-3.5 w-3.5" />
-              <span>Геймпад</span>
+              <span>{s.gamepadBtn}</span>
             </button>
           </div>
 
@@ -1067,7 +1059,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 playerZ={hud.playerZ}
                 playerYaw={hud.playerYaw}
                 season={hud.season}
-                zoneName={hud.zoneName}
+                zoneName={translatedZoneName}
                 biomeId={hud.biomeId}
                 entities={hud.minimapEntities}
                 trailCells={hud.trailCells}
@@ -1091,7 +1083,7 @@ export const GameHud: React.FC<GameHudProps> = ({
               onClick={() => setShowHelp(false)}
               className="rounded-lg bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-800 hover:bg-slate-300 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
             >
-              Закрити
+              {s.closeLabel}
             </button>
           </div>
           <div className="grid grid-cols-2 gap-y-2 gap-x-4 text-xs">
@@ -1194,7 +1186,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                   className="flex items-center gap-1 rounded-lg border border-emerald-500/45 bg-emerald-500/15 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-500/25 dark:border-emerald-400/45 dark:text-emerald-200"
                 >
                   <Save className="h-3.5 w-3.5" />
-                  <span>Зберегти</span>
+                  <span>{s.saveBtn}</span>
                 </button>
               )}
               {onNewGame && (
@@ -1208,7 +1200,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                   className="flex items-center gap-1 rounded-lg border border-rose-500/40 bg-rose-500/15 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-500/25 dark:border-rose-400/40 dark:text-rose-200"
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
-                  <span>Нова гра</span>
+                  <span>{s.resetBtn}</span>
                 </button>
               )}
             </div>
@@ -2073,7 +2065,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                   onClick={() => setArsenalOpen(false)}
                   className="rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-slate-500 hover:bg-slate-200/70 dark:text-slate-300 dark:hover:bg-slate-800"
                 >
-                  Закрити
+                  {s.closeLabel}
                 </button>
               </div>
               <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 md:grid-cols-4">
@@ -2097,8 +2089,8 @@ export const GameHud: React.FC<GameHudProps> = ({
                       }}
                       title={
                         lockedWeapon
-                          ? `У режимі Виживання скрафтіть «${w.name}» у меню Крафту [K]`
-                          : `${w.name} (${w.damage} шк.) — ${w.description}`
+                          ? `${s.craftBtn} [K]`
+                          : `${w.name} (${w.damage}) — ${w.description}`
                       }
                       className={`flex items-center justify-between gap-1.5 rounded-xl border px-2 py-1.5 text-left text-[11px] font-semibold transition-colors ${
                         active
@@ -2137,7 +2129,7 @@ export const GameHud: React.FC<GameHudProps> = ({
             >
               <div className="mb-2 flex items-center justify-between border-b border-slate-200 pb-1.5 dark:border-white/10">
                 <span className="text-xs font-bold text-slate-900 dark:text-white">
-                  Виклик мобів ({SPAWN_MOBS.length} видів)
+                  {s.spawnerBtn} ({SPAWN_MOBS.length})
                 </span>
                 <button
                   type="button"
@@ -2145,7 +2137,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                   onClick={() => setMobSpawnerOpen(false)}
                   className="rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-slate-500 hover:bg-slate-200/70 dark:text-slate-300 dark:hover:bg-slate-800"
                 >
-                  Закрити
+                  {s.closeLabel}
                 </button>
               </div>
               <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 md:grid-cols-4">
@@ -2212,7 +2204,7 @@ export const GameHud: React.FC<GameHudProps> = ({
               className="flex items-center gap-1 rounded-t-lg sm:rounded-t-xl border border-b-0 border-slate-300/80 bg-white/88 px-2 py-0.5 sm:px-3 text-[9px] sm:text-[10px] font-semibold text-slate-600 backdrop-blur-md hover:text-slate-900 dark:border-white/15 dark:bg-slate-950/85 dark:text-slate-300 dark:hover:text-white"
             >
               {dockCollapsed ? <ChevronUp className="h-2.5 w-2.5 sm:h-3 sm:w-3" /> : <ChevronDown className="h-2.5 w-2.5 sm:h-3 sm:w-3" />}
-              <span>{dockCollapsed ? 'Арсенал' : 'Згорнути'}</span>
+              <span>{dockCollapsed ? s.arsenalBtn : '▾'}</span>
             </button>
 
             {!dockCollapsed && (
@@ -2240,7 +2232,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                         }}
                         title={
                           lockedWeapon
-                            ? `У режимі Виживання скрафтіть «${w.name}» у меню Крафту [K]`
+                            ? `${s.craftBtn} [K]`
                             : w.description
                         }
                         className={`relative flex items-center gap-1.5 overflow-hidden rounded-xl border px-2 py-1.5 text-[11px] font-semibold whitespace-nowrap shrink-0 transition-colors ${
@@ -2281,7 +2273,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                       setMobSpawnerOpen(false);
                       setArsenalOpen((v) => !v);
                     }}
-                    title="Відкрити весь арсенал з 32 видів зброї"
+                    title={s.arsenalBtn}
                     className={`flex items-center gap-1 rounded-xl border px-2 py-1.5 text-[11px] font-bold whitespace-nowrap shrink-0 transition-colors ${
                       arsenalOpen
                         ? 'border-sky-500 bg-sky-500 text-slate-950'
@@ -2305,7 +2297,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                   onPointerUp={() => onSetBlocking(false)}
                   onPointerLeave={() => onSetBlocking(false)}
                   onPointerCancel={() => onSetBlocking(false)}
-                  title="Утримуйте для блоку щитом (ПКМ або B)"
+                  title={`${s.actionShield} (B)`}
                   className={`flex items-center gap-1 rounded-xl border px-2 py-1.5 text-[11px] font-bold whitespace-nowrap shrink-0 transition-colors ${
                     hud.blocking
                       ? 'border-sky-400 bg-sky-500 text-slate-950'
@@ -2313,7 +2305,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                   }`}
                 >
                   <Shield className="h-3.5 w-3.5" />
-                  <span>Щит (B)</span>
+                  <span>{s.actionShield} (B)</span>
                 </button>
 
                 {/* Active Owned Relics (Z, X, C) */}
@@ -2338,7 +2330,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                       }`}
                     >
                       <Sparkles className="h-3 w-3" style={{ color: cd <= 0 ? rel.colorHex : undefined }} />
-                      <span>{rel.key}{cd > 0 ? ` ${Math.ceil(cd)}с` : ''}</span>
+                      <span>{rel.key}{cd > 0 ? ` ${Math.ceil(cd)}${s.secShort}` : ''}</span>
                     </button>
                   );
                 })}
@@ -2352,7 +2344,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                     e.currentTarget.blur();
                     onUseConsumable('potion');
                   }}
-                  title="Випити зілля лікування (клавіша 8)"
+                  title="8"
                   className={`flex items-center gap-1 rounded-xl border px-2 py-1.5 text-[11px] font-semibold whitespace-nowrap shrink-0 transition-colors ${
                     hud.consumables.potion > 0
                       ? 'border-emerald-500/45 bg-emerald-500/15 text-emerald-800 hover:bg-emerald-500/25 dark:border-emerald-400/45 dark:text-emerald-200'
@@ -2360,7 +2352,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                   }`}
                 >
                   <FlaskConical className="h-3 w-3" />
-                  <span className="font-mono-nums">Зілля ({hud.consumables.potion})</span>
+                  <span className="font-mono-nums">{s.filterPotions.split(' ')[0]} ({hud.consumables.potion})</span>
                 </button>
                 {hud.consumables.mega_potion > 0 && (
                   <button
@@ -2370,11 +2362,11 @@ export const GameHud: React.FC<GameHudProps> = ({
                       e.currentTarget.blur();
                       onUseConsumable('mega_potion');
                     }}
-                    title="Велике зілля зцілення (+120 HP) (клавіша 9)"
+                    title="9"
                     className="flex items-center gap-1 rounded-xl border border-rose-500/50 bg-rose-500/18 px-2 py-1.5 text-[11px] font-semibold text-rose-800 whitespace-nowrap shrink-0 transition-colors hover:bg-rose-500/28 dark:border-rose-400/50 dark:text-rose-200"
                   >
                     <FlaskConical className="h-3 w-3" />
-                    <span className="font-mono-nums">Вел. ({hud.consumables.mega_potion})</span>
+                    <span className="font-mono-nums">+120 ({hud.consumables.mega_potion})</span>
                   </button>
                 )}
                 {hud.consumables.cooked_meat > 0 && (
@@ -2385,11 +2377,11 @@ export const GameHud: React.FC<GameHudProps> = ({
                       e.currentTarget.blur();
                       onUseConsumable('cooked_meat');
                     }}
-                    title="З’їсти смажене м’ясо (+65 HP, +40 витр.) (клавіша 0)"
+                    title="0"
                     className="flex items-center gap-1 rounded-xl border border-orange-500/50 bg-orange-500/18 px-2 py-1.5 text-[11px] font-semibold text-orange-800 whitespace-nowrap shrink-0 transition-colors hover:bg-orange-500/28 dark:border-orange-400/50 dark:text-orange-200"
                   >
                     <Sparkles className="h-3 w-3" />
-                    <span className="font-mono-nums">М’ясо ({hud.consumables.cooked_meat})</span>
+                    <span className="font-mono-nums">+65 ({hud.consumables.cooked_meat})</span>
                   </button>
                 )}
                 {CONSUMABLES.some(
@@ -2406,11 +2398,11 @@ export const GameHud: React.FC<GameHudProps> = ({
                       e.currentTarget.blur();
                       onOpenInventory('inventory');
                     }}
-                    title="Відкрити еліксири бафів у Інвентарі (I)"
+                    title={`${s.inventoryBtn} (I)`}
                     className="flex items-center gap-1 rounded-xl border border-purple-500/50 bg-purple-500/15 px-2 py-1.5 text-[11px] font-semibold text-purple-800 whitespace-nowrap shrink-0 hover:bg-purple-500/25 dark:border-purple-400/50 dark:text-purple-200"
                   >
                     <FlaskConical className="h-3 w-3" />
-                    <span>Еліксири</span>
+                    <span>{s.filterPotions}</span>
                   </button>
                 )}
 
@@ -2435,22 +2427,22 @@ export const GameHud: React.FC<GameHudProps> = ({
                   {hud.activeWeapon === 'builder' ? (
                     <>
                       <Wrench className="h-3 w-3" />
-                      <span>Збудувати</span>
+                      <span>{s.actionBuild}</span>
                     </>
                   ) : hud.activeWeapon === 'axe' ? (
                     <>
                       <Axe className="h-3 w-3" />
-                      <span>Зрубати</span>
+                      <span>{s.actionChop}</span>
                     </>
                   ) : hud.activeWeapon === 'pickaxe' ? (
                     <>
                       <Pickaxe className="h-3 w-3" />
-                      <span>Добути</span>
+                      <span>{s.actionMine}</span>
                     </>
                   ) : (
                     <>
                       <Sword className="h-3 w-3" />
-                      <span>Удар</span>
+                      <span>{s.actionAttack}</span>
                     </>
                   )}
                 </button>
@@ -2468,7 +2460,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                         e.currentTarget.blur();
                         onSpawnMob(m.kind);
                       }}
-                      title={`Викликати: ${m.label}`}
+                      title={m.label}
                       className="flex items-center gap-1 rounded-xl border border-slate-300/80 bg-slate-100/80 px-2 py-1.5 text-[11px] font-medium text-slate-700 whitespace-nowrap shrink-0 transition-colors hover:border-emerald-500/45 hover:bg-slate-200 hover:text-slate-900 dark:border-white/10 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:border-emerald-400/40 dark:hover:bg-slate-800 dark:hover:text-white"
                     >
                       <Plus className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
@@ -2483,7 +2475,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                       setArsenalOpen(false);
                       setMobSpawnerOpen((v) => !v);
                     }}
-                    title="Усі 25 мобів та боси"
+                    title={s.spawnerBtn}
                     className={`flex items-center gap-1 rounded-xl border px-2 py-1.5 text-[11px] font-bold whitespace-nowrap shrink-0 transition-colors ${
                       mobSpawnerOpen
                         ? 'border-emerald-500 bg-emerald-500 text-slate-950'
@@ -2491,7 +2483,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                     }`}
                   >
                     <Plus className="h-3 w-3" />
-                    <span>Моби ({SPAWN_MOBS.length})</span>
+                    <span>{s.spawnerBtn} ({SPAWN_MOBS.length})</span>
                     {mobSpawnerOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
                   </button>
                 </div>
@@ -2502,6 +2494,7 @@ export const GameHud: React.FC<GameHudProps> = ({
           {/* Mobile Virtual Gamepad - Pinned as very last bottom child so it NEVER leaves screen */}
           {touchMode && (
             <MobileGamepad
+              language={language}
               activeWeapon={hud.activeWeapon}
               gameMode={hud.gameMode}
               cameraViewMode={hud.cameraViewMode}
